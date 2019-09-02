@@ -745,9 +745,6 @@ class MoonLineContainer(Moonshot):
         with timeit("Preparing price dataframe"):
             shifted_prices = prices.stack().unstack("Field").sort_index()
 
-        # TODO: add ability to sideload extra data into the dataframe
-        # ideally we'd end up with one standardised dataframe containing all data
-
         if "Time" in shifted_prices.index.names:
             strategy = self.intraday_strategy(shifted_prices)
         else:
