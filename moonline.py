@@ -313,7 +313,7 @@ class History():
     def history(self, bar_count, frequency=None):
         """Return a window of 'bar_count' bars into the past, starting from algorithm time.
 
-        Data will automatically be resample if the base data is not in the correct format.
+        Data will automatically be resampled if the base data is not in the correct format.
         Missing data is filled using the fill-forward method.
         Resampling from large strides into small ones can be RAM intensive (i.e. Daily source bars to second bars).
         """
@@ -560,8 +560,11 @@ class CapeShillerETFsEU(MoonLineStrategy):
         # If any of the ETF's prices moved by more than 0.2%, allow trading, otherwise don't
         prices = self.history.history(2)["Open"]
         over_change_margin = prices.unstack("ConId").pct_change() > 0.002
-        if not over_change_margin.any(axis=None) and not self.current_datetime in self.FORCE_TRADE:
-            return
+        try:
+            if not over_change_margin.any(axis=None) and not self.current_datetime in self.FORCE_TRADE:
+                return
+        except:
+            pass
 
         if regime == 4:
             etfs = {
