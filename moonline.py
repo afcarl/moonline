@@ -1,3 +1,7 @@
+### Warnings ###
+import warnings
+warnings.filterwarnings("ignore")
+
 ### System ###
 import os
 import csv
@@ -324,8 +328,10 @@ class History():
 
         data = self.data.resample(frequency.time_string(), level=0).last().ffill().stack(level=1)
         # data = self.data.groupby([pd.Grouper(level="Datetime", freq=frequency.time_string()), pd.Grouper(level="ConId")]).last()
-        # sliced = data.loc[self.current_datetime - pd.Timedelta(seconds=frequency.seconds * bar_count - 1):self.current_datetime]
-        sliced_index = data.index.levels[0].to_series()[:self.current_datetime]
+        # sliced = data.loc[self.current_datetime -
+        # pd.Timedelta(seconds=frequency.seconds * bar_count -
+        # 1):self.current_datetime]
+        sliced_index = data.index.levels[0].to_series(keep_tz=True)[:self.current_datetime]
         index_values = pd.DatetimeIndex(sliced_index)[-bar_count:]
         sliced = data.loc[pd.IndexSlice[index_values, :], :]
 
@@ -559,11 +565,8 @@ class CapeShillerETFsEU(MoonLineStrategy):
         # If any of the ETF's prices moved by more than 0.2%, allow trading, otherwise don't
         prices = self.history.history(2)["Open"]
         over_change_margin = prices.unstack("ConId").pct_change() > 0.002
-        try:
-            if not over_change_margin.any(axis=None) and not self.current_datetime in self.FORCE_TRADE:
-                return
-        except:
-            pass
+        if not over_change_margin.any(axis=None) and not self.current_datetime in self.FORCE_TRADE:
+            return
 
         if regime == 4:
             etfs = {
@@ -767,13 +770,6 @@ class MoonLineContainer(Moonshot):
         # Once the strategy has run, we can generate the dataframe containing the signals Moonshot expects
         signals = strategy.generate_signals()
 
-        # signals.to_csv("/codeload/signals_eu.csv")
-
-        # df = pd.DataFrame(strategy.regime_data).set_index("date")
-        # df.index = pd.to_datetime(df.index, format="%Y-%m-%dT%H:%M:%S.%f")
-        # df.plot()
-        # plt.savefig("regime_plot.jpg")
-
         return signals
 
     def signals_to_target_weights(self, signals, prices):
@@ -814,25 +810,77 @@ def main(args):
         # Figure out the first row where all column values are present
         # first_no_nan_date = prices.loc[~prices.isnull().sum(1).astype(bool)].iloc[0].name[1]
 
+    securities_master = pd.read_csv("../data/listings.csv").set_index("ConId").sort_index()
+    # Remove all unused entries for performance improvements
+    securities_master = securities_master[securities_master.index.isin(list(prices.columns))]
+
     cs = MoonLineContainer()
+    # This is normally assigned by QuantRocket
+    cs._securities_master = securities_master
 
-    cs_signals = cs.prices_to_signals(prices)
-    cs_weights = cs.signals_to_target_weights(cs_signals, prices)
-    cs_positions = cs.target_weights_to_positions(cs_weights, prices)
-    cs_returns = cs.positions_to_gross_returns(cs_positions, prices)
+    allocation = 1.0
+    label_conids = False
 
-    cs_returns.plot()
-    plt.savefig("eu_return_plot.jpg")
+    signals = cs.prices_to_signals(prices)
+    weights = cs.signals_to_target_weights(signals, prices)
+    weights = weights * allocation
+    weights = cs._constrain_weights(weights, prices)
+    positions = cs.target_weights_to_positions(weights, prices)
+    gross_returns = cs.positions_to_gross_returns(positions, prices)
+    commissions = cs._get_commissions(positions, prices)
+    slippages = cs._get_slippage(positions, prices)
+    returns = gross_returns.fillna(0) - commissions - slippages
+    turnover = cs._positions_to_turnover(positions)
 
-    # Field,Date,<strategy_code>
-    # AbsExposure
-    # AbsWeight
-    # Commission
-    # NetExposure
-    # Return
-    # Slippage
-    # TotalHoldings
-    # Turnover
+    total_holdings = (positions.fillna(0) != 0).astype(int)
+
+    results_are_intraday = "Time" in signals.index.names
+
+    all_results = dict(Signal=signals, Weight=weights, AbsWeight=weights.abs(),
+                       AbsExposure=positions.abs(), NetExposure=positions,
+                       Turnover=turnover, TotalHoldings=total_holdings,
+                       Commission=commissions, Slippage=slippages, Return=returns)
+
+    # validate that custom backtest results are daily if results are daily
+    for custom_name, custom_df in cs._backtest_results.items():
+        if "Time" in custom_df.index.names and not results_are_intraday:
+            raise Exception("custom DataFrame '{0}' won't concat properly with 'Time' in index, "
+                            "please take a cross-section first, for example: "
+                            "`my_dataframe.xs('15:45:00', level='Time')`".format(custom_name))
+
+    all_results.update(cs._backtest_results)
+
+    if cs.BENCHMARK:
+        all_results["Benchmark"] = cs._get_benchmark(prices, daily=not results_are_intraday)
+
+    results = pd.concat(all_results)
+
+    names = ["Field", "Date"]
+    if results.index.nlevels == 3:
+        names.append("Time")
+
+    results.index.set_names(names, inplace=True)
+
+    if label_conids:
+        symbols = cs._securities_master.Symbol
+        sec_types = cs._securities_master.SecType
+        currencies = cs._securities_master.Currency
+        symbols = symbols.astype(str).str.cat(currencies, sep=".").where(sec_types == "CASH", symbols)
+        symbols_with_conids = symbols.astype(str) + "(" + symbols.index.astype(str) + ")"
+        results.rename(columns=symbols_with_conids.to_dict(), inplace=True)
+
+    # truncate at requested start_date
+    if args.start_date:
+        results = results.iloc[results.index.get_level_values(
+            "Date") >= pd.Timestamp(args.start_date.format("YYYY-MM-DD"))]
+
+    results.to_csv(args.output_file)
+
+    if args.weights_file:
+        weights.to_csv(args.weights_file)
+
+    pdf_file = os.path.splitext(os.path.basename(args.output_file))[0]
+    Tearsheet.from_moonshot_csv(args.output_file, pdf_filename="{}.pdf".format(pdf_file))
 
 
 def check(args):
@@ -841,16 +889,31 @@ def check(args):
         sys.exit(1)
 
     if os.path.isfile(args.output_file):
-        print("The output file exists. Do you want to overwrite it?")
-        result = input("[y]es/[n]o: ").lower()
-        if not result in ["y", "yes"]:
-            print("Aborted")
-            sys.exit(0)
+        if not args.yes:
+            print("The output file exists. Do you want to overwrite it?")
+            result = input("[y]es/[n]o: ").lower()
+            if not result in ["y", "yes"]:
+                print("Aborted")
+                sys.exit(0)
         os.remove(args.output_file)
 
     dirs = os.path.dirname(args.output_file)
     if dirs:
         os.makedirs(dirs, exist_ok=True)
+
+    if args.weights_file:
+        if os.path.isfile(args.weights_file):
+            if not args.yes:
+                print("The weights file exists. Do you want to overwrite it?")
+                result = input("[y]es/[n]o: ").lower()
+                if not result in ["y", "yes"]:
+                    print("Aborted")
+                    sys.exit(0)
+            os.remove(args.weights_file)
+
+        dirs = os.path.dirname(args.weights_file)
+        if dirs:
+            os.makedirs(dirs, exist_ok=True)
 
     if args.start_date and args.end_date and args.start_date > args.end_date:
         print("End date must be larger than start date!")
@@ -861,6 +924,7 @@ if __name__ == '__main__':
     import sys
     import argparse
     import matplotlib.pyplot as plt
+    from moonchart import Tearsheet
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input", type=str, dest="input_file", required=True,
@@ -871,6 +935,10 @@ if __name__ == '__main__':
                         metavar="YYYY-MM-DD", help="The day to end the backtest at")
     parser.add_argument("-o", "--output", type=str, dest="output_file", default="results.csv",
                         metavar="results.csv", help="The file to output backtest results to (default: results.csv)")
+    parser.add_argument("-w", "--weights", type=str, dest="weights_file",
+                        metavar="weights.csv", help="The file to save calculated weights to")
+    parser.add_argument("-y", "--yes", action="store_true", dest="yes",
+                        help="If given, automatically answers script questions with 'yes'")
     args = parser.parse_args()
 
     if args.start_date:
