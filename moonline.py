@@ -811,10 +811,8 @@ def main(args):
         elif not args.start_date and args.end_date:
             prices = prices.loc[pd.IndexSlice[:, :str(args.end_date), :], :]
         prices.columns.name = "ConId"
-        # first_no_nan_row = prices.loc[~prices.isnull().sum(1).astype(bool)].iloc[0]
-
-    print(prices)
-    sys.exit()
+        # Figure out the first row where all column values are present
+        # first_no_nan_date = prices.loc[~prices.isnull().sum(1).astype(bool)].iloc[0].name[1]
 
     cs = MoonLineContainer()
 
