@@ -1,6 +1,5 @@
 ### System ###
 import os
-import sys
 import csv
 import pytz
 from enum import Enum, IntEnum
@@ -17,7 +16,7 @@ except ImportError:
     is_quantrocket = False
     from quantrocket_utils import initialize as assets_init, Asset, timeit
     with timeit("Loading Listings"):
-        assets_init("data/listings.csv")
+        assets_init("../data/listings.csv")
 
 ### Display ###
 from tqdm import tqdm
@@ -466,7 +465,7 @@ class CapeShillerETFsEU(MoonLineStrategy):
                                                                     "script_data",
                                                                     "cape_shiller_data.csv"))
         else:
-            self.cape_shiller_data = pd.read_csv("data/cape_shiller_data.csv")
+            self.cape_shiller_data = pd.read_csv("../data/cape_shiller_data.csv")
         self.cape_shiller_data = self.cape_shiller_data.set_index("Date")
         self.cape_shiller_data.index = pd.to_datetime(self.cape_shiller_data.index, format="%Y-%m-%dT%H:%M:%S.%f")
 
@@ -744,9 +743,21 @@ class MoonLineContainer(Moonshot):
         return strategy
 
     def prices_to_signals(self, prices):
-        # prices = prices.bfill().ffill()
+        filled = prices.bfill().ffill()
         with timeit("Preparing price dataframe"):
-            shifted_prices = prices.stack().unstack("Field").sort_index()
+            all_tickers = list(prices.columns)
+            all_fields = sorted(list(filled.index.levels[0]))
+
+            proto_df = defaultdict(lambda: defaultdict(int))
+
+            for ticker in all_tickers:
+                for field in all_fields:
+                    for timestamp, value in filled[ticker][field].iteritems():
+                        proto_df[field][(timestamp, ticker)] = value
+
+            shifted_prices = pd.DataFrame(proto_df).sort_index()
+            shifted_prices.columns.name = "Field"
+            shifted_prices.index.names = ("Date", "ConId")
 
         if "Time" in shifted_prices.index.names:
             strategy = self.intraday_strategy(shifted_prices)
@@ -784,17 +795,26 @@ class MoonLineContainer(Moonshot):
         return gross_returns
 
 
-def main():
+def main(args):
     # with timeit("Loading price data"):
     #     prices = pd.read_csv("prices-intraday.csv").set_index(["Field", "Date", "Time"])
     #     prices.columns.name = "ConId"
-    #     prices = prices.ffill().bfill()
     #     prices = prices.xs("10:00:00", level="Time")
 
     with timeit("Loading price data"):
-        prices = pd.read_csv("data/eu-eod.csv").set_index(["Field", "Date"])
+        prices = pd.read_csv(args.input_file).set_index(["Field", "Date"])
+        # prices = prices.loc[pd.IndexSlice[:, "2019-01-01":"2019-01-12", :], :]
+        if args.start_date and args.end_date:
+            prices = prices.loc[pd.IndexSlice[:, str(args.start_date):str(args.end_date), :], :]
+        elif args.start_date and not args.end_date:
+            prices = prices.loc[pd.IndexSlice[:, str(args.start_date):, :], :]
+        elif not args.start_date and args.end_date:
+            prices = prices.loc[pd.IndexSlice[:, :str(args.end_date), :], :]
         prices.columns.name = "ConId"
-        prices = prices.ffill().bfill()
+        # first_no_nan_row = prices.loc[~prices.isnull().sum(1).astype(bool)].iloc[0]
+
+    print(prices)
+    sys.exit()
 
     cs = MoonLineContainer()
 
@@ -803,19 +823,68 @@ def main():
     cs_positions = cs.target_weights_to_positions(cs_weights, prices)
     cs_returns = cs.positions_to_gross_returns(cs_positions, prices)
 
-    # print(cs_signals)
-    # print(cs_returns)
-
     cs_returns.plot()
     plt.savefig("eu_return_plot.jpg")
 
+    # Field,Date,<strategy_code>
+    # AbsExposure
+    # AbsWeight
+    # Commission
+    # NetExposure
+    # Return
+    # Slippage
+    # TotalHoldings
+    # Turnover
+
+
+def check(args):
+    if not os.path.isfile(args.input_file):
+        print("The input file does not exist!")
+        sys.exit(1)
+
+    if os.path.isfile(args.output_file):
+        print("The output file exists. Do you want to overwrite it?")
+        result = input("[y]es/[n]o: ").lower()
+        if not result in ["y", "yes"]:
+            print("Aborted")
+            sys.exit(0)
+        os.remove(args.output_file)
+
+    dirs = os.path.dirname(args.output_file)
+    if dirs:
+        os.makedirs(dirs, exist_ok=True)
+
+    if args.start_date and args.end_date and args.start_date > args.end_date:
+        print("End date must be larger than start date!")
+        sys.exit(1)
+
 
 if __name__ == '__main__':
+    import sys
+    import argparse
     import matplotlib.pyplot as plt
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-i", "--input", type=str, dest="input_file", required=True,
+                        metavar="prices.csv", help="(required) A CSV file containing price data to backtest on")
+    parser.add_argument("-s", "--start-date", type=str, dest="start_date",
+                        metavar="YYYY-MM-DD", help="The day to start the backtest from")
+    parser.add_argument("-e", "--end-date", type=str, dest="end_date",
+                        metavar="YYYY-MM-DD", help="The day to end the backtest at")
+    parser.add_argument("-o", "--output", type=str, dest="output_file", default="results.csv",
+                        metavar="results.csv", help="The file to output backtest results to (default: results.csv)")
+    args = parser.parse_args()
+
+    if args.start_date:
+        args.start_date = arrow.get(args.start_date, "YYYY-MM-DD")
+    if args.end_date:
+        args.end_date = arrow.get(args.end_date, "YYYY-MM-DD")
+
+    check(args)
 
     try:
         with timeit():
-            main()
+            main(args)
         print("Done")
     except KeyboardInterrupt:
         print("Aborted")
