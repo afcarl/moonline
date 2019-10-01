@@ -806,6 +806,9 @@ def main(args):
         prices.columns.name = "ConId"
         # Figure out the first row where all column values are present
         # first_no_nan_date = prices.loc[~prices.isnull().sum(1).astype(bool)].iloc[0].name[1]
+        # Deduplicate index (apparently some QuantRocket exports contain duplicate rows)
+        duplicates = prices.index.duplicated(keep="last")
+        prices = prices.loc[duplicates == False,:]
 
     securities_master = pd.read_csv("../data/listings.csv").set_index("ConId").sort_index()
     # Remove all unused entries for performance improvements
