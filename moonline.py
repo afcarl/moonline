@@ -5,20 +5,17 @@ warnings.filterwarnings("ignore")
 ### System ###
 import os
 import csv
-import pytz
 from enum import Enum, IntEnum
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
 ### Local ###
 try:
-    is_quantrocket = True
-    from codeload.lib.quantrocket_utils import initialize as assets_init, Asset, timeit
+    from codeload.lib.quantrocket_utils import initialize as assets_init, Asset, timeit, is_quantrocket
     with timeit("Loading Listings"):
         assets_init("/codeload/satellite_scripts/script_data/listings.csv")
 except ImportError:
-    is_quantrocket = False
-    from quantrocket_utils import initialize as assets_init, Asset, timeit
+    from quantrocket_utils import initialize as assets_init, Asset, timeit, is_quantrocket
     with timeit("Loading Listings"):
         assets_init("../data/listings.csv")
 
@@ -465,7 +462,7 @@ class CapeShillerETFsEU(MoonLineStrategy):
         self.last_regime = 3
         self.regime_data = defaultdict(list)
         self.cape_history = []
-        if is_quantrocket:
+        if is_quantrocket():
             self.cape_shiller_data = pd.read_csv("/" + os.path.join("codeload",
                                                                     "satellite_scripts",
                                                                     "script_data",
@@ -879,8 +876,9 @@ def main(args):
     if args.weights_file:
         weights.to_csv(args.weights_file)
 
-    pdf_file = os.path.splitext(os.path.basename(args.output_file))[0]
-    Tearsheet.from_moonshot_csv(args.output_file, pdf_filename="{}.pdf".format(pdf_file))
+    with timeit("Rendering Tearsheets"):
+        pdf_file = os.path.splitext(os.path.basename(args.output_file))[0]
+        Tearsheet.from_moonshot_csv(args.output_file, pdf_filename="{}.pdf".format(pdf_file))
 
 
 def check(args):
@@ -923,7 +921,8 @@ def check(args):
 if __name__ == '__main__':
     import sys
     import argparse
-    import matplotlib.pyplot as plt
+
+    ### Charting Libraries ###
     from moonchart import Tearsheet
 
     parser = argparse.ArgumentParser()
@@ -949,8 +948,7 @@ if __name__ == '__main__':
     check(args)
 
     try:
-        with timeit():
-            main(args)
+        main(args)
         print("Done")
     except KeyboardInterrupt:
         print("Aborted")
