@@ -17,7 +17,7 @@ quantrocket-moonshot = "^1.9"
 quantrocket-moonchart = "^1.8"
 trading-calendars = "^1.10"
 ib-trading-calendars = "^0.1.2"
-quantrocket-utils = "^0.1.1"
+quantrocket-utils = "^0.1.4"
 
 [tool.poetry.dev-dependencies]
 

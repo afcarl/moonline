@@ -16,8 +16,6 @@ try:
         assets_init("/codeload/satellite_scripts/script_data/listings.csv")
 except ImportError:
     from quantrocket_utils import initialize as assets_init, Asset, timeit, is_quantrocket
-    with timeit("Loading Listings"):
-        assets_init("../data/listings.csv")
 
 ### Display ###
 from tqdm import tqdm
@@ -931,6 +929,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input", type=str, dest="input_file", required=True,
                         metavar="prices.csv", help="(required) A CSV file containing price data to backtest on")
+    parser.add_argument("-l", "--listings", type=str, dest="listings_file", required=True,
+                        metavar="listings.csv", help="The file containing InteractiveBrokers listings data")
     parser.add_argument("-s", "--start-date", type=str, dest="start_date",
                         metavar="YYYY-MM-DD", help="The day to start the backtest from")
     parser.add_argument("-e", "--end-date", type=str, dest="end_date",
@@ -949,6 +949,9 @@ if __name__ == '__main__':
         args.end_date = arrow.get(args.end_date, "YYYY-MM-DD")
 
     check(args)
+
+    with timeit("Loading Listings"):
+        assets_init("../data/listings.csv")
 
     try:
         main(args)
