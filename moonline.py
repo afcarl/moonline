@@ -5,6 +5,7 @@ warnings.filterwarnings("ignore")
 ### System ###
 import os
 import csv
+import datetime
 from enum import Enum, IntEnum
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -398,7 +399,7 @@ class MoonLineStrategy(ABC):
     def order_target_percent(self, asset, percentage):
         if self.mode == StrategyMode.INTRADAY:
             self.orders[asset.conid][(pd.Timestamp(self.current_datetime.date()),
-                                      str(self.current_datetime.time()))] = percentage
+                                      self.current_datetime.time())] = percentage
         elif self.mode == StrategyMode.DAILY:
             self.orders[asset.conid][(pd.Timestamp(self.current_datetime.date()))] = percentage
 
@@ -412,9 +413,15 @@ class MoonLineStrategy(ABC):
         df.columns = df.columns.map(int)
 
         now = arrow.utcnow().to(self.timezone)
-        latest_available_date = arrow.get(df.iloc[-1].name, self.timezone).shift(days=1)
+        if self.mode == StrategyMode.INTRADAY:
+            date, time = df.iloc[-1].name
+            latest_available_date = arrow.get(pd.Timestamp.combine(date, time),
+                                              self.timezone).shift(days=1)
+        elif self.mode == StrategyMode.DAILY:
+            latest_available_date = arrow.get(df.iloc[-1].name,
+                                              self.timezone).shift(days=1)
         diff = now - latest_available_date
-        if diff.days >= 1:
+        if 1 <= diff.days < 3:
             for new_date in arrow.Arrow.range("day", latest_available_date, now):
                 if new_date.weekday() in (5, 6):
                     continue
@@ -670,9 +677,10 @@ class MoonLineContainer(Moonshot):
 
         # Main Loop
         with timeit("Running backtest"):
-            grouped = shifted_prices.groupby(level="Date")
-            for day_index, day_data in tqdm(grouped, total=len(grouped), unit="days"):
-                for time_index, time_data in day_data.loc[day_index].groupby(level="Time"):
+            days_grouped = shifted_prices.groupby(level="Date")
+            for day_index, day_data in tqdm(days_grouped, total=len(days_grouped), unit="days"):
+                hours_grouped = day_data.loc[day_index].groupby(level="Time")
+                for time_index, time_data in tqdm(hours_grouped, total=len(hours_grouped), unit="hours", leave=False):
                     datetime = arrow.get("{} {}".format(day_index, time_index)).replace(tzinfo=strategy.timezone)
                     date, time = str(datetime.date()), str(datetime.time())
                     data = time_data.loc[time_index]
@@ -748,16 +756,27 @@ class MoonLineContainer(Moonshot):
 
             proto_df = defaultdict(lambda: defaultdict(int))
 
-            for ticker in all_tickers:
-                for field in all_fields:
-                    for timestamp, value in filled[ticker][field].iteritems():
-                        proto_df[field][(timestamp, ticker)] = value
+            if "Time" in prices.index.names:
+                for ticker in all_tickers:
+                    for field in all_fields:
+                        for timestamp, value in filled[ticker][field].iteritems():
+                            date, time = timestamp
+                            proto_df[field][(date, time, ticker)] = value
 
-            shifted_prices = pd.DataFrame(proto_df).sort_index()
-            shifted_prices.columns.name = "Field"
-            shifted_prices.index.names = ("Date", "ConId")
+                shifted_prices = pd.DataFrame(proto_df).sort_index()
+                shifted_prices.columns.name = "Field"
+                shifted_prices.index.names = ("Date", "Time", "ConId")
+            else:
+                for ticker in all_tickers:
+                    for field in all_fields:
+                        for timestamp, value in filled[ticker][field].iteritems():
+                            proto_df[field][(timestamp, ticker)] = value
 
-        if "Time" in shifted_prices.index.names:
+                shifted_prices = pd.DataFrame(proto_df).sort_index()
+                shifted_prices.columns.name = "Field"
+                shifted_prices.index.names = ("Date", "ConId")
+
+        if "Time" in prices.index.names:
             strategy = self.intraday_strategy(shifted_prices)
         else:
             strategy = self.daily_strategy(shifted_prices)
@@ -793,8 +812,11 @@ def main(args):
     #     prices = prices.xs("10:00:00", level="Time")
 
     with timeit("Loading price data"):
-        prices = pd.read_csv(args.input_file).set_index(["Field", "Date"])
-        # prices = prices.loc[pd.IndexSlice[:, "2019-01-01":"2019-01-12", :], :]
+        prices = pd.read_csv(args.input_file)
+        indexes = ["Field", "Date"]
+        if "Time" in list(prices.columns):
+            indexes = ["Field", "Date", "Time"]
+        prices = prices.set_index(indexes)
         if args.start_date and args.end_date:
             prices = prices.loc[pd.IndexSlice[:, str(args.start_date):str(args.end_date), :], :]
         elif args.start_date and not args.end_date:
@@ -802,11 +824,13 @@ def main(args):
         elif not args.start_date and args.end_date:
             prices = prices.loc[pd.IndexSlice[:, :str(args.end_date), :], :]
         prices.columns.name = "ConId"
+
         # Figure out the first row where all column values are present
         # first_no_nan_date = prices.loc[~prices.isnull().sum(1).astype(bool)].iloc[0].name[1]
+
         # Deduplicate index (apparently some QuantRocket exports contain duplicate rows)
         duplicates = prices.index.duplicated(keep="last")
-        prices = prices.loc[duplicates == False,:]
+        prices = prices.loc[duplicates == False, :]
 
     securities_master = pd.read_csv("../data/listings.csv").set_index("ConId").sort_index()
     # Remove all unused entries for performance improvements
