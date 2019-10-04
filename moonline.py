@@ -858,12 +858,10 @@ def main(args):
         print("The input data is in an unsupported format.\nPlease double-check your input files.")
         sys.exit(1)
 
-    with timeit("loading master"):
+    with timeit("Loading securities master"):
         securities_master = pd.read_csv(args.listings_file).set_index("ConId").sort_index()
         # Remove all unused entries for performance improvements
         securities_master = securities_master[securities_master.index.isin(list(prices.columns))]
-
-    sys.exit()
 
     cs = MoonLineContainer()
     # This is normally assigned by QuantRocket
