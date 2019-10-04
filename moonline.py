@@ -5,6 +5,7 @@ warnings.filterwarnings("ignore")
 ### System ###
 import os
 import csv
+import pickle
 import datetime
 from enum import Enum, IntEnum
 from abc import ABC, abstractmethod
@@ -826,11 +827,6 @@ class MoonLineContainer(Moonshot):
 
 
 def main(args):
-    # with timeit("Loading price data"):
-    #     prices = pd.read_csv("prices-intraday.csv").set_index(["Field", "Date", "Time"])
-    #     prices.columns.name = "ConId"
-    #     prices = prices.xs("10:00:00", level="Time")
-
     with timeit("Loading price data"):
         prices = pd.read_csv(args.input_file)
         indexes = ["Field", "Date"]
@@ -859,9 +855,18 @@ def main(args):
         sys.exit(1)
 
     with timeit("Loading securities master"):
-        securities_master = pd.read_csv(args.listings_file).set_index("ConId").sort_index()
-        # Remove all unused entries for performance improvements
-        securities_master = securities_master[securities_master.index.isin(list(prices.columns))]
+        if not args.clear_cache and os.path.exists("securities_master.bin"):
+            with open("securities_master.bin", "rb") as f:
+                securities_master = pickle.load(f)
+            if list(map(str, securities_master.index)) != list(prices.columns):
+                securities_master = None
+
+        if securities_master is None:
+            securities_master = pd.read_csv(args.listings_file).set_index("ConId").sort_index()
+            # Remove all unused entries for performance improvements
+            securities_master = securities_master[securities_master.index.isin(list(prices.columns))]
+            with open("securities_master.bin", "wb") as f:
+                pickle.dump(securities_master, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     cs = MoonLineContainer()
     # This is normally assigned by QuantRocket
@@ -992,6 +997,8 @@ if __name__ == '__main__':
                         metavar="weights.csv", help="The file to save calculated weights to")
     parser.add_argument("-y", "--yes", action="store_true", dest="yes",
                         help="If given, automatically answers script questions with 'yes'")
+    parser.add_argument("-c", "--clear-cache", action="store_true", dest="clear_cache",
+                        help="If given, ignores cached data")
     args = parser.parse_args()
 
     if args.start_date:
