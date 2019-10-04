@@ -951,7 +951,7 @@ if __name__ == '__main__':
     check(args)
 
     with timeit("Loading Listings"):
-        assets_init("../data/listings.csv")
+        assets_init(args.listings_file)
 
     try:
         main(args)
