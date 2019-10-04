@@ -39,7 +39,12 @@ except:
 class SchedulerMode(Enum):
     """Modes that a TimeScheduler can operate in.
 
-    TODO: Description
+    Attributes:
+        INTERVAL: Triggers on specific intervals, i.e. Daily, Monthly or Yearly.
+        DATETIME: Triggers when both the date and time components of a given
+            datetime object occur.
+        DATE: Triggers when the date component of a given date object occurs.
+        TIME: Triggers when the time component of a given time object occurs.
     """
     INTERVAL = 1
     DATETIME = 2
@@ -48,21 +53,26 @@ class SchedulerMode(Enum):
 
 
 class TimeScheduler():
-    """Schedule methods to run at specific dates and / or times.
+    """Schedules a given method to run at a specific date and/or time.
 
-    TODO: Description
+    Attributes:
+        mode (SchedulerMode): A SchedulerMode instance.
+        method (function): The method to run.
+        calendar: The trading calendar this scheduler is active in.
+        timezone: The timezone this scheduler is active in.
     """
 
-    def __init__(self, data, mode):
+    def __init__(self, data: dict, mode: SchedulerMode):
         """Internal constructor for TimeScheduler objects.
 
         Note:
-            Only for internal use. Refer to the supplied class methods
-            for object creation.
+            `__init__` is private in this case and only for internal use.
+            Refer to the supplied class methods for object creation.
 
         Args:
-            data (:obj: `dict`): Description of `param1`.
-            mode (:obj: `SchedulerMode`): Description of `param2`.
+            data (dict): A dictionary of data to initialize the object.
+                This is generally created by the static class methods.
+            mode (SchedulerMode): The mode this scheduler should operate in.
         """
         self.mode = mode
         self.method = data.get("method")
@@ -95,11 +105,13 @@ class TimeScheduler():
             self.datetime = self.datetime.replace(tzinfo=self.timezone).to("UTC")
 
     @classmethod
-    def schedule_datetime(cls, method, date, time, calendar="NYSE"):
+    def schedule_datetime(cls, method, date: str, time: str, calendar: str="NYSE") -> TimeScheduler:
         """Schedule a method to run at a specific date and time.
 
         Example:
+            ```python
             TimeScheduler.schedule_datetime("2018-01-01", "10:30:00")
+            ```
         """
         datetime = arrow.get("{} {}".format(date, time), "YYYY-MM-DD HH:mm:ss")
         data = {
@@ -110,11 +122,13 @@ class TimeScheduler():
         return cls(data, mode=SchedulerMode.DATETIME)
 
     @classmethod
-    def schedule_date(cls, method, date, calendar="NYSE"):
+    def schedule_date(cls, method, date: str, calendar: str="NYSE") -> TimeScheduler:
         """Schedule a method to run at a specific date.
 
         Example:
+            ```python
             TimeScheduler.schedule_date("2018-01-01")
+            ```
         """
         date = arrow.get(date, "YYYY-MM-DD")
         data = {
@@ -125,11 +139,13 @@ class TimeScheduler():
         return cls(data, mode=SchedulerMode.DATE)
 
     @classmethod
-    def schedule_time(cls, method, time, calendar="NYSE"):
+    def schedule_time(cls, method, time: str, calendar: str="NYSE") -> TimeScheduler:
         """Schedule a method to run at a specific time.
 
         Example:
+            ```python
             TimeScheduler.schedule_time("10:30:00")
+            ```
         """
         time = arrow.get(time, "HH:mm:ss")
         data = {
@@ -140,11 +156,13 @@ class TimeScheduler():
         return cls(data, mode=SchedulerMode.TIME)
 
     @classmethod
-    def schedule_interval(cls, method, interval, frequency, time=None, calendar="NYSE"):
+    def schedule_interval(cls, method, interval: str, frequency: int, time: str=None, calendar: str="NYSE") -> TimeScheduler:
         """Schedule a method to run at a specific interval and optional time.
 
         Example:
+            ```python
             TimeScheduler.schedule_interval("D", 3)
+            ```
         """
         data = {
             "interval": interval,
@@ -155,9 +173,11 @@ class TimeScheduler():
         }
         return cls(data, mode=SchedulerMode.INTERVAL)
 
-    def time_check(self, time, current_datetime):
-        """
-        Checks whether the current time is within market hours.
+    def time_check(self, time: str, current_datetime: datetime.datetime) -> bool:
+        """Checks whether the current time is within market hours.
+
+        Returns:
+            bool: The return value. True for success, False otherwise.
         """
         market_open, market_close = self.calendar.schedule.loc[current_datetime.date()]
         market_open, market_close = arrow.get(market_open), arrow.get(market_close)
@@ -176,7 +196,7 @@ class TimeScheduler():
                 return False
         return True
 
-    def check(self, time, current_datetime):
+    def check(self, time: str, current_datetime: datetime.datetime) -> bool:
         if current_datetime.date() in self.calendar.schedule.index:
             # Exchange is open
             if time and not self.time_check(time, current_datetime):
@@ -191,7 +211,7 @@ class TimeScheduler():
             # Exchange is closed
             return False
 
-    def should_run(self, date, time=None):
+    def should_run(self, date: str, time: str=None) -> bool:
         if time:
             current_datetime = arrow.get("{} {}".format(date, time), "YYYY-MM-DD HH:mm:ss")
         else:

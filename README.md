@@ -12,8 +12,16 @@ $ poetry install
 
 ### Generating Documentation
 ```bash
-$ poetry run pdoc --html moonline.py
+$ poetry run pdoc --config show_type_annotations=True --html --force moonline.py
 ```
+
+### Working on Documentation
+`pdoc` can be switched into hot-reload mode by appending the following:
+```bash
+$ poetry run pdoc --config show_type_annotations=True --html --force moonline.py --http :
+```
+
+This will open a webserver on `localhost:8080` which will auto-reload whenever a change is made to docstrings in the observed modules.
 
 ### Strategy Development
 Moonline files are self-contained and act like a regular Moonshot algorithm definition in QuantRocket. To install a Moonline algorithm, simply drop the file into the `moonshot` directory, after which it will become instantly accessible in the backtester.
