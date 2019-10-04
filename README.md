@@ -10,6 +10,11 @@ $ cd moonline/
 $ poetry install
 ```
 
+### Generating Documentation
+```bash
+$ poetry run pdoc --html moonline.py
+```
+
 ### Strategy Development
 Moonline files are self-contained and act like a regular Moonshot algorithm definition in QuantRocket. To install a Moonline algorithm, simply drop the file into the `moonshot` directory, after which it will become instantly accessible in the backtester.
 
