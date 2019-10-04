@@ -855,6 +855,7 @@ def main(args):
         sys.exit(1)
 
     with timeit("Loading securities master"):
+        securities_master = None
         if not args.clear_cache and os.path.exists("securities_master.bin"):
             with open("securities_master.bin", "rb") as f:
                 securities_master = pickle.load(f)
