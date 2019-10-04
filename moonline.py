@@ -852,9 +852,18 @@ def main(args):
         duplicates = prices.index.duplicated(keep="last")
         prices = prices.loc[duplicates == False, :]
 
-    securities_master = pd.read_csv("../data/listings.csv").set_index("ConId").sort_index()
-    # Remove all unused entries for performance improvements
-    securities_master = securities_master[securities_master.index.isin(list(prices.columns))]
+    try:
+        arrow.get(prices.index.levels[1][0], "YYYY-MM-DD")
+    except arrow.parser.ParserMatchError:
+        print("The input data is in an unsupported format.\nPlease double-check your input files.")
+        sys.exit(1)
+
+    with timeit("loading master"):
+        securities_master = pd.read_csv(args.listings_file).set_index("ConId").sort_index()
+        # Remove all unused entries for performance improvements
+        securities_master = securities_master[securities_master.index.isin(list(prices.columns))]
+
+    sys.exit()
 
     cs = MoonLineContainer()
     # This is normally assigned by QuantRocket
