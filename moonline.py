@@ -105,7 +105,7 @@ class TimeScheduler():
             self.datetime = self.datetime.replace(tzinfo=self.timezone).to("UTC")
 
     @classmethod
-    def schedule_datetime(cls, method, date: str, time: str, calendar: str="NYSE") -> TimeScheduler:
+    def schedule_datetime(cls, method, date: str, time: str, calendar: str="NYSE"):
         """Schedule a method to run at a specific date and time.
 
         Example:
@@ -122,7 +122,7 @@ class TimeScheduler():
         return cls(data, mode=SchedulerMode.DATETIME)
 
     @classmethod
-    def schedule_date(cls, method, date: str, calendar: str="NYSE") -> TimeScheduler:
+    def schedule_date(cls, method, date: str, calendar: str="NYSE"):
         """Schedule a method to run at a specific date.
 
         Example:
@@ -139,7 +139,7 @@ class TimeScheduler():
         return cls(data, mode=SchedulerMode.DATE)
 
     @classmethod
-    def schedule_time(cls, method, time: str, calendar: str="NYSE") -> TimeScheduler:
+    def schedule_time(cls, method, time: str, calendar: str="NYSE"):
         """Schedule a method to run at a specific time.
 
         Example:
@@ -156,7 +156,7 @@ class TimeScheduler():
         return cls(data, mode=SchedulerMode.TIME)
 
     @classmethod
-    def schedule_interval(cls, method, interval: str, frequency: int, time: str=None, calendar: str="NYSE") -> TimeScheduler:
+    def schedule_interval(cls, method, interval: str, frequency: int, time: str=None, calendar: str="NYSE"):
         """Schedule a method to run at a specific interval and optional time.
 
         Example:
