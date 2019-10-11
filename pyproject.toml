@@ -18,6 +18,7 @@ quantrocket-moonchart = "^1.8"
 trading-calendars = "^1.10"
 ib-trading-calendars = "^0.1.2"
 quantrocket-utils = "^0.1.5"
+pymarketstore = {git = "https://github.com/alpacahq/pymarketstore.git"}
 
 [tool.poetry.dev-dependencies]
 pdoc3 = "^0.7.1"

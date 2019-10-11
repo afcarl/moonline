@@ -826,27 +826,71 @@ class MoonLineContainer(Moonshot):
         return gross_returns
 
 
+class UniverseDefinition(Enum):
+    QTradeableStocksUS = 1
+    Q500US = 2
+    Q1500US = 3
+    Q3000US = 4
+
+
+class Pipeline():
+
+    # https://www.quantopian.com/docs/api-reference/pipeline-api-reference#quantopian.pipeline.filters.Q500US
+
+    def __init__(self, data):
+        # receives the full dataset
+        # emits the requested subset as a history object
+        self.data = data
+
+    def get_universe(self, universe_definition: UniverseDefinition):
+        # The 'Q' universes are recomputed at the start of every month
+        pass
+
+
 def main(args):
-    with timeit("Loading price data"):
-        prices = pd.read_csv(args.input_file)
-        indexes = ["Field", "Date"]
-        if "Time" in list(prices.columns):
-            indexes = ["Field", "Date", "Time"]
-        prices = prices.set_index(indexes).sort_index()
-        if args.start_date and args.end_date:
-            prices = prices.loc[pd.IndexSlice[:, str(args.start_date):str(args.end_date), :], :]
-        elif args.start_date and not args.end_date:
-            prices = prices.loc[pd.IndexSlice[:, str(args.start_date):, :], :]
-        elif not args.start_date and args.end_date:
-            prices = prices.loc[pd.IndexSlice[:, :str(args.end_date), :], :]
-        prices.columns.name = "ConId"
+    if args.database:
+        with timeit("Loading price data from database"):
+            client = pms.Client(args.database)
 
-        # Figure out the first row where all column values are present
-        # first_no_nan_date = prices.loc[~prices.isnull().sum(1).astype(bool)].iloc[0].name[1]
+            DATA_TO_COPY = ["Open", "High", "Low", "Close", "Volume"]
+            symbol_data_files = {}
 
-        # Deduplicate index (apparently some QuantRocket exports contain duplicate rows)
-        duplicates = prices.index.duplicated(keep="last")
-        prices = prices.loc[duplicates == False, :]
+            for asset in Asset:
+                data = client.query(pms.Params(asset.symbol, "1D", "OHLCV", limit=201)).first().df()
+                symbol_data_files[asset.conid] = data
+
+            proto_df = {}
+            for symbol, data in symbol_data_files.items():
+                for index, row in data.iterrows():
+                    date = arrow.get(index, tzinfo="Europe/London")
+                    proto_df[(symbol, date.format("YYYY-MM-DD"))] = row.values
+
+            prices = pd.DataFrame.from_dict(proto_df, orient="index", columns=DATA_TO_COPY)
+            prices.index = pd.MultiIndex.from_tuples(prices.index)
+            prices.index.names = ["ConId", "Date"]
+            prices.columns.name = "Field"
+            prices = prices.stack().unstack("ConId").swaplevel(0, 1).sort_index()
+    else:
+        with timeit("Loading price data from disk"):
+            prices = pd.read_csv(args.input_file)
+            indexes = ["Field", "Date"]
+            if "Time" in list(prices.columns):
+                indexes = ["Field", "Date", "Time"]
+            prices = prices.set_index(indexes).sort_index()
+            if args.start_date and args.end_date:
+                prices = prices.loc[pd.IndexSlice[:, str(args.start_date):str(args.end_date), :], :]
+            elif args.start_date and not args.end_date:
+                prices = prices.loc[pd.IndexSlice[:, str(args.start_date):, :], :]
+            elif not args.start_date and args.end_date:
+                prices = prices.loc[pd.IndexSlice[:, :str(args.end_date), :], :]
+            prices.columns.name = "ConId"
+
+            # Figure out the first row where all column values are present
+            # first_no_nan_date = prices.loc[~prices.isnull().sum(1).astype(bool)].iloc[0].name[1]
+
+            # Deduplicate index (apparently some QuantRocket exports contain duplicate rows)
+            duplicates = prices.index.duplicated(keep="last")
+            prices = prices.loc[duplicates == False, :]
 
     try:
         arrow.get(prices.index.levels[1][0], "YYYY-MM-DD")
@@ -940,7 +984,7 @@ def main(args):
 
 
 def check(args):
-    if not os.path.isfile(args.input_file):
+    if args.input_file and not os.path.isfile(args.input_file):
         print("The input file does not exist!")
         sys.exit(1)
 
@@ -957,15 +1001,14 @@ def check(args):
     if dirs:
         os.makedirs(dirs, exist_ok=True)
 
-    if args.weights_file:
-        if os.path.isfile(args.weights_file):
-            if not args.yes:
-                print("The weights file exists. Do you want to overwrite it?")
-                result = input("[y]es/[n]o: ").lower()
-                if not result in ["y", "yes"]:
-                    print("Aborted")
-                    sys.exit(0)
-            os.remove(args.weights_file)
+    if args.weights_file and os.path.isfile(args.weights_file):
+        if not args.yes:
+            print("The weights file exists. Do you want to overwrite it?")
+            result = input("[y]es/[n]o: ").lower()
+            if not result in ["y", "yes"]:
+                print("Aborted")
+                sys.exit(0)
+        os.remove(args.weights_file)
 
         dirs = os.path.dirname(args.weights_file)
         if dirs:
@@ -979,13 +1022,14 @@ def check(args):
 if __name__ == '__main__':
     import sys
     import argparse
+    import pymarketstore as pms
 
     ### Charting Libraries ###
     from moonchart import Tearsheet
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--input", type=str, dest="input_file", required=True,
-                        metavar="prices.csv", help="(required) A CSV file containing price data to backtest on")
+    parser.add_argument("-i", "--input", type=str, dest="input_file",
+                        metavar="prices.csv", help="A CSV file containing price data to backtest on")
     parser.add_argument("-l", "--listings", type=str, dest="listings_file", required=True,
                         metavar="listings.csv", help="The file containing InteractiveBrokers listings data")
     parser.add_argument("-s", "--start-date", type=str, dest="start_date",
@@ -996,6 +1040,8 @@ if __name__ == '__main__':
                         metavar="results.csv", help="The file to output backtest results to (default: results.csv)")
     parser.add_argument("-w", "--weights", type=str, dest="weights_file",
                         metavar="weights.csv", help="The file to save calculated weights to")
+    parser.add_argument("-d", "--database", type=str, dest="database",
+                        metavar="http://localhost:5993/rpc", help="The connection string to the price database")
     parser.add_argument("-y", "--yes", action="store_true", dest="yes",
                         help="If given, automatically answers script questions with 'yes'")
     parser.add_argument("-c", "--clear-cache", action="store_true", dest="clear_cache",
