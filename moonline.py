@@ -7,6 +7,7 @@ import os
 import csv
 import pickle
 import datetime
+from glob import glob
 from enum import Enum, IntEnum
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -385,9 +386,10 @@ class MoonLineStrategy(ABC):
 
     CALENDAR = "NYSE"
 
-    def __init__(self, mode, history):
+    def __init__(self, mode, history, pipeline):
         self.mode = mode
         self.history = history
+        self.pipeline = pipeline
         self.scheduled_methods = []
         self.current_datetime = None
         self.orders = defaultdict(dict)
@@ -580,6 +582,10 @@ class CapeShillerETFsEU(MoonLineStrategy):
         return regime
 
     def rebalance(self, data):
+        # TODO: This is just for testing to trigger the pipeline
+        # The strategy does not make use of this information
+        selected = self.pipeline.get_universe(UniverseDefinition.Q500US)
+
         self.regime_check(data, force=False)
         regime = self.last_regime
         self.regime_data["date"].append(self.current_datetime.datetime)
@@ -694,7 +700,8 @@ class MoonLineContainer(Moonshot):
                                                               for x in shifted_prices.index])
             shifted_prices.index.names = ["Date", "Time", "ConId"]
             history = History(history_data, frequency)
-            strategy = CapeShillerETFsEU(mode=StrategyMode.INTRADAY, history=history)
+            pipeline = Pipeline()
+            strategy = CapeShillerETFsEU(mode=StrategyMode.INTRADAY, history=history, pipeline=pipeline)
 
         # Main Loop
         with timeit("Running backtest"):
@@ -707,6 +714,8 @@ class MoonLineContainer(Moonshot):
                     data = time_data.loc[time_index]
                     # Update the History object
                     history.update_time(datetime)
+                    # Update the Pipeline object
+                    pipeline.update_time(datetime)
                     # Run the main data handling function
                     strategy.run_handle_data(datetime, data=data)
                     # Run all scheduled functions
@@ -749,7 +758,8 @@ class MoonLineContainer(Moonshot):
             shifted_prices.index = pd.MultiIndex.from_tuples([(x[0], Asset(int(x[1]))) for x in shifted_prices.index])
             shifted_prices.index.names = ["Date", "ConId"]
             history = History(history_data, frequency)
-            strategy = CapeShillerETFsEU(mode=StrategyMode.DAILY, history=history)
+            pipeline = Pipeline()
+            strategy = CapeShillerETFsEU(mode=StrategyMode.DAILY, history=history, pipeline=pipeline)
 
         # Main Loop
         with timeit("Running backtest"):
@@ -760,6 +770,8 @@ class MoonLineContainer(Moonshot):
                 data = day_data.loc[day_index]
                 # Update the History object
                 history.update_time(datetime)
+                # Update the Pipeline object
+                pipeline.update_time(datetime)
                 # Run the main data handling function
                 strategy.run_handle_data(datetime, data=data)
                 # Run all scheduled functions
@@ -835,16 +847,104 @@ class UniverseDefinition(Enum):
 
 class Pipeline():
 
-    # https://www.quantopian.com/docs/api-reference/pipeline-api-reference#quantopian.pipeline.filters.Q500US
+    def __init__(self):
+        self.client = pms.Client(args.database)
+        self.last_result = {}
+        self.last_time = None
+        self.last_month = None
+        self.current_datetime = None
+        self.current_datetime_formatted = None
 
-    def __init__(self, data):
-        # receives the full dataset
-        # emits the requested subset as a history object
-        self.data = data
+        self.cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "moonline-cache")
+        os.makedirs(self.cache_dir, exist_ok=True)
+        self.cache = defaultdict(dict)
+        for file in glob(os.path.join(self.cache_dir, "*.pkl")):
+            ext_stripped = os.path.splitext(os.path.basename(file))[0]
+            cache_file_time, category = os.path.splitext(ext_stripped)
+            self.cache[cache_file_time][category.lstrip(".")] = file
+
+        self.faulty_symbols = set()
+        faulty_symbols_file = os.path.join(self.cache_dir, "faulty_symbols.pkl")
+        if os.path.isfile(faulty_symbols_file):
+            with open(faulty_symbols_file, "rb") as f:
+                self.faulty_symbols = pickle.load(f)
+
+    def update_time(self, datetime):
+        self.current_datetime = datetime
+        self.current_datetime_formatted = datetime.format("YYYY-MM-DD HH-mm-ss")
+
+    def calculate_average_dollar_volume(self):
+        if self.current_datetime_formatted in self.cache and self.cache[self.current_datetime_formatted].get("adv"):
+            with open(self.cache[self.current_datetime_formatted]["adv"], "rb") as f:
+                adv_list = pickle.load(f)
+            return adv_list
+
+        adv_list = {}
+        available_symbols = self.client.list_symbols()
+        tqdm.write("Calculating universe ADV")
+        for symbol in tqdm(available_symbols, total=len(available_symbols), unit="symbols", leave=False):
+            try:
+                data = self.client.query(pms.Params(symbol, "1D", "OHLCV", limit=201)).first().df()
+            except:
+                continue
+            if len(data) < 200:
+                continue
+            current_dollar_volume = data["Volume"].rolling(window=200).mean().shift(1).iloc[-1]
+            adv_list[symbol] = current_dollar_volume
+
+        with open(os.path.join(self.cache_dir, "{}.adv.pkl".format(self.current_datetime_formatted)), "wb") as f:
+            pickle.dump(adv_list, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+        return adv_list
+
+    def calculate_market_capitalization(self, adv_list):
+        if self.current_datetime_formatted in self.cache and self.cache[self.current_datetime_formatted].get("mcp"):
+            with open(self.cache[self.current_datetime_formatted]["mcp"], "rb") as f:
+                marketcap_list = pickle.load(f)
+            return marketcap_list
+
+        marketcap_list = {}
+        adv_symbols = set(adv_list.keys()) - self.faulty_symbols
+        new_faulty_symbols = set()
+        tqdm.write("Calculating universe market capitalization")
+        for symbol in tqdm(adv_symbols, total=len(adv_symbols), unit="symbols", leave=False):
+            try:
+                data = self.client.query(pms.Params(symbol, "1D", "FD", limit=1)).first().df()
+            except:
+                new_faulty_symbols.add(symbol)
+                continue
+            if sum(data["Marketcap"] > 0) > 0:
+                marketcap_list[symbol] = adv_list[symbol]
+
+        faulty_symbols_file = os.path.join(self.cache_dir, "faulty_symbols.pkl")
+        if not os.path.isfile(faulty_symbols_file) or new_faulty_symbols:
+            with open(faulty_symbols_file, "wb") as f:
+                pickle.dump(self.faulty_symbols | new_faulty_symbols, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+        with open(os.path.join(self.cache_dir, "{}.mcp.pkl".format(self.current_datetime_formatted)), "wb") as f:
+            pickle.dump(marketcap_list, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+        return marketcap_list
 
     def get_universe(self, universe_definition: UniverseDefinition):
-        # The 'Q' universes are recomputed at the start of every month
-        pass
+        """TODO
+            This is called from the running strategy at any point in the backtest
+            it should calculate which stocks to show, then use the "history" object to return
+            a DataFrame of the OHLCV values for the selected stocks
+        """
+        print((self.current_datetime.year, self.current_datetime.month), self.last_time)
+        if (self.current_datetime.year, self.current_datetime.month) != self.last_time:
+            tqdm.write("Recalculating pipeline")
+            self.last_time = (self.current_datetime.year, self.current_datetime.month)
+            adv_list = self.calculate_average_dollar_volume()
+            selected_stocks = self.calculate_market_capitalization(adv_list)
+            full_sorted = [symbol for symbol, adv in sorted(selected_stocks.items(), key=lambda x: x[1], reverse=True)]
+            self.last_result[UniverseDefinition.Q500US] = full_sorted[:500]
+            self.last_result[UniverseDefinition.Q1500US] = full_sorted[:1500]
+            self.last_result[UniverseDefinition.Q3000US] = full_sorted[:3000]
+            self.last_result[UniverseDefinition.QTradeableStocksUS] = full_sorted
+
+        return self.last_result[universe_definition]
 
 
 def main(args):
