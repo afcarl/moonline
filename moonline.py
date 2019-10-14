@@ -24,6 +24,7 @@ except ImportError:
 from tqdm import tqdm
 
 ### Data Handling ###
+import numpy as np
 import pandas as pd
 
 ### Date Handling ###
@@ -863,12 +864,6 @@ class Pipeline():
             cache_file_time, category = os.path.splitext(ext_stripped)
             self.cache[cache_file_time][category.lstrip(".")] = file
 
-        self.faulty_symbols = set()
-        faulty_symbols_file = os.path.join(self.cache_dir, "faulty_symbols.pkl")
-        if os.path.isfile(faulty_symbols_file):
-            with open(faulty_symbols_file, "rb") as f:
-                self.faulty_symbols = pickle.load(f)
-
     def update_time(self, datetime):
         self.current_datetime = datetime
         self.current_datetime_formatted = datetime.format("YYYY-MM-DD HH-mm-ss")
@@ -881,15 +876,17 @@ class Pipeline():
 
         adv_list = {}
         available_symbols = self.client.list_symbols()
-        tqdm.write("Calculating universe ADV")
-        for symbol in tqdm(available_symbols, total=len(available_symbols), unit="symbols", leave=False):
-            try:
-                data = self.client.query(pms.Params(symbol, "1D", "OHLCV", limit=201)).first().df()
-            except:
+        if not available_symbols:
+            return {}
+
+        result = self.client.query(pms.Params(available_symbols, "1D", "OHLCV",
+                                              end=self.current_datetime_formatted,
+                                              limit=201)).all()
+        for symbol, data in tqdm(result.items(), total=len(result), unit="symbols", leave=False):
+            symbol = symbol.split("/")[0]
+            if len(data.array) < 200:
                 continue
-            if len(data) < 200:
-                continue
-            current_dollar_volume = data["Volume"].rolling(window=200).mean().shift(1).iloc[-1]
+            current_dollar_volume = np.mean(data.array["Volume"][:-1])
             adv_list[symbol] = current_dollar_volume
 
         with open(os.path.join(self.cache_dir, "{}.adv.pkl".format(self.current_datetime_formatted)), "wb") as f:
@@ -898,28 +895,23 @@ class Pipeline():
         return adv_list
 
     def calculate_market_capitalization(self, adv_list):
+        if not adv_list:
+            return {}
+
         if self.current_datetime_formatted in self.cache and self.cache[self.current_datetime_formatted].get("mcp"):
             with open(self.cache[self.current_datetime_formatted]["mcp"], "rb") as f:
                 marketcap_list = pickle.load(f)
             return marketcap_list
 
         marketcap_list = {}
-        adv_symbols = set(adv_list.keys()) - self.faulty_symbols
-        new_faulty_symbols = set()
-        tqdm.write("Calculating universe market capitalization")
-        for symbol in tqdm(adv_symbols, total=len(adv_symbols), unit="symbols", leave=False):
-            try:
-                data = self.client.query(pms.Params(symbol, "1D", "FD", limit=1)).first().df()
-            except:
-                new_faulty_symbols.add(symbol)
-                continue
-            if sum(data["Marketcap"] > 0) > 0:
+        adv_symbols = set(adv_list.keys())
+        result = self.client.query(pms.Params(adv_symbols, "1D", "FD",
+                                              end=self.current_datetime_formatted,
+                                              limit=1)).all()
+        for symbol, data in tqdm(result.items(), total=len(result), unit="symbols", leave=False):
+            symbol = symbol.split("/")[0]
+            if sum(data.array["Marketcap"] > 0) > 0:
                 marketcap_list[symbol] = adv_list[symbol]
-
-        faulty_symbols_file = os.path.join(self.cache_dir, "faulty_symbols.pkl")
-        if not os.path.isfile(faulty_symbols_file) or new_faulty_symbols:
-            with open(faulty_symbols_file, "wb") as f:
-                pickle.dump(self.faulty_symbols | new_faulty_symbols, f, protocol=pickle.HIGHEST_PROTOCOL)
 
         with open(os.path.join(self.cache_dir, "{}.mcp.pkl".format(self.current_datetime_formatted)), "wb") as f:
             pickle.dump(marketcap_list, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -932,9 +924,7 @@ class Pipeline():
             it should calculate which stocks to show, then use the "history" object to return
             a DataFrame of the OHLCV values for the selected stocks
         """
-        print((self.current_datetime.year, self.current_datetime.month), self.last_time)
         if (self.current_datetime.year, self.current_datetime.month) != self.last_time:
-            tqdm.write("Recalculating pipeline")
             self.last_time = (self.current_datetime.year, self.current_datetime.month)
             adv_list = self.calculate_average_dollar_volume()
             selected_stocks = self.calculate_market_capitalization(adv_list)
@@ -943,7 +933,6 @@ class Pipeline():
             self.last_result[UniverseDefinition.Q1500US] = full_sorted[:1500]
             self.last_result[UniverseDefinition.Q3000US] = full_sorted[:3000]
             self.last_result[UniverseDefinition.QTradeableStocksUS] = full_sorted
-
         return self.last_result[universe_definition]
 
 
@@ -955,9 +944,11 @@ def main(args):
             DATA_TO_COPY = ["Open", "High", "Low", "Close", "Volume"]
             symbol_data_files = {}
 
-            for asset in Asset:
-                data = client.query(pms.Params(asset.symbol, "1D", "OHLCV", limit=201)).first().df()
-                symbol_data_files[asset.conid] = data
+            requested_assets = {asset.symbol: str(asset.conid) for asset in Asset}
+            result = client.query(pms.Params(list(requested_assets.keys()), "1D", "OHLCV")).all()
+            for symbol, data in result.items():
+                symbol = symbol.split("/")[0]
+                symbol_data_files[requested_assets[symbol]] = data.df()
 
             proto_df = {}
             for symbol, data in symbol_data_files.items():
@@ -1003,7 +994,7 @@ def main(args):
         if not args.clear_cache and os.path.exists("securities_master.bin"):
             with open("securities_master.bin", "rb") as f:
                 securities_master = pickle.load(f)
-            if list(map(str, securities_master.index)) != list(prices.columns):
+            if list(map(str, securities_master.index)) != list(map(str, prices.columns)):
                 securities_master = None
 
         if securities_master is None:
