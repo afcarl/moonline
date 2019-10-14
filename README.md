@@ -56,14 +56,14 @@ class MyStrategy(MoonLineStrategy):
 
 ## Usage
 ```bash
-usage: moonline.py [-h] -i prices.csv -l listings.csv [-s YYYY-MM-DD]
-                   [-e YYYY-MM-DD] [-o results.csv] [-w weights.csv] [-y]
+usage: moonline.py [-h] [-i prices.csv] -l listings.csv [-s YYYY-MM-DD]
+                   [-e YYYY-MM-DD] [-o results.csv] [-w weights.csv] [-d URL]
+                   [-y] [-c]
 
 optional arguments:
   -h, --help            show this help message and exit
   -i prices.csv, --input prices.csv
-                        (required) A CSV file containing price data to
-                        backtest on
+                        A CSV file containing price data to backtest on
   -l listings.csv, --listings listings.csv
                         The file containing InteractiveBrokers listings data
   -s YYYY-MM-DD, --start-date YYYY-MM-DD
@@ -71,15 +71,22 @@ optional arguments:
   -e YYYY-MM-DD, --end-date YYYY-MM-DD
                         The day to end the backtest at
   -o results.csv, --output results.csv
-                        The file to output backtest results to (default:
-                        results.csv)
+                        The file to output backtest results to
   -w weights.csv, --weights weights.csv
                         The file to save calculated weights to
+  -d URL, --database URL
+                        The connection string to the price database
   -y, --yes             If given, automatically answers script questions with
                         'yes'
+  -c, --clear-cache     If given, ignores cached data
 ```
 
 ### Running a Backtest
 ```bash
 $ poetry run python moonline.py -i <price_data> -l <listings_data>
 ```
+
+### On Speed
+MoonLine makes heavy use of caching to speed up similar runs. As such, it is natural that the first run of a specific backtest takes a while longer than the subsequent ones. It automatically maintains its cache and invalidates it if the backtest parameters change, so no user input or maintenance is required on this front.
+
+If you'd still like to do a completely un-cached run, use the `-c` flag.

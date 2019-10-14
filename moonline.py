@@ -1128,11 +1128,11 @@ if __name__ == '__main__':
     parser.add_argument("-e", "--end-date", type=str, dest="end_date",
                         metavar="YYYY-MM-DD", help="The day to end the backtest at")
     parser.add_argument("-o", "--output", type=str, dest="output_file", default="results.csv",
-                        metavar="results.csv", help="The file to output backtest results to (default: results.csv)")
+                        metavar="results.csv", help="The file to output backtest results to")
     parser.add_argument("-w", "--weights", type=str, dest="weights_file",
                         metavar="weights.csv", help="The file to save calculated weights to")
     parser.add_argument("-d", "--database", type=str, dest="database",
-                        metavar="http://localhost:5993/rpc", help="The connection string to the price database")
+                        metavar="URL", help="The connection string to the price database")
     parser.add_argument("-y", "--yes", action="store_true", dest="yes",
                         help="If given, automatically answers script questions with 'yes'")
     parser.add_argument("-c", "--clear-cache", action="store_true", dest="clear_cache",
