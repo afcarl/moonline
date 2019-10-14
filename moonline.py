@@ -882,7 +882,7 @@ class Pipeline():
         result = self.client.query(pms.Params(available_symbols, "1D", "OHLCV",
                                               end=self.current_datetime_formatted,
                                               limit=201)).all()
-        for symbol, data in tqdm(result.items(), total=len(result), unit="symbols", leave=False):
+        for symbol, data in result.items():
             symbol = symbol.split("/")[0]
             if len(data.array) < 200:
                 continue
@@ -908,7 +908,7 @@ class Pipeline():
         result = self.client.query(pms.Params(adv_symbols, "1D", "FD",
                                               end=self.current_datetime_formatted,
                                               limit=1)).all()
-        for symbol, data in tqdm(result.items(), total=len(result), unit="symbols", leave=False):
+        for symbol, data in result.items():
             symbol = symbol.split("/")[0]
             if sum(data.array["Marketcap"] > 0) > 0:
                 marketcap_list[symbol] = adv_list[symbol]
