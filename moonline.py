@@ -585,7 +585,7 @@ class CapeShillerETFsEU(MoonLineStrategy):
     def rebalance(self, data):
         # TODO: This is just for testing to trigger the pipeline
         # The strategy does not make use of this information
-        selected = self.pipeline.get_universe(UniverseDefinition.Q500US)
+        # selected = self.pipeline.get_universe(UniverseDefinition.Q500US)
 
         self.regime_check(data, force=False)
         regime = self.last_regime
@@ -919,11 +919,6 @@ class Pipeline():
         return marketcap_list
 
     def get_universe(self, universe_definition: UniverseDefinition):
-        """TODO
-            This is called from the running strategy at any point in the backtest
-            it should calculate which stocks to show, then use the "history" object to return
-            a DataFrame of the OHLCV values for the selected stocks
-        """
         if (self.current_datetime.year, self.current_datetime.month) != self.last_time:
             self.last_time = (self.current_datetime.year, self.current_datetime.month)
             adv_list = self.calculate_average_dollar_volume()
@@ -933,6 +928,7 @@ class Pipeline():
             self.last_result[UniverseDefinition.Q1500US] = full_sorted[:1500]
             self.last_result[UniverseDefinition.Q3000US] = full_sorted[:3000]
             self.last_result[UniverseDefinition.QTradeableStocksUS] = full_sorted
+        # TODO: return OHLCV values instead of just the tickers
         return self.last_result[universe_definition]
 
 
@@ -945,7 +941,14 @@ def main(args):
             symbol_data_files = {}
 
             requested_assets = {asset.symbol: str(asset.conid) for asset in Asset}
-            result = client.query(pms.Params(list(requested_assets.keys()), "1D", "OHLCV")).all()
+
+            if args.start_date and args.end_date:
+                result = client.query(pms.Params(list(requested_assets.keys()), "1D", "OHLCV", start=str(args.start_date), end=str(args.end_date))).all()
+            elif args.start_date and not args.end_date:
+                result = client.query(pms.Params(list(requested_assets.keys()), "1D", "OHLCV", start=str(args.start_date))).all()
+            elif not args.start_date and args.end_date:
+                result = client.query(pms.Params(list(requested_assets.keys()), "1D", "OHLCV", end=str(args.end_date))).all()
+
             for symbol, data in result.items():
                 symbol = symbol.split("/")[0]
                 symbol_data_files[requested_assets[symbol]] = data.df()
@@ -994,13 +997,13 @@ def main(args):
         if not args.clear_cache and os.path.exists("securities_master.bin"):
             with open("securities_master.bin", "rb") as f:
                 securities_master = pickle.load(f)
-            if list(map(str, securities_master.index)) != list(map(str, prices.columns)):
+            if set(map(str, securities_master.index)) != set(map(str, prices.columns)):
                 securities_master = None
 
         if securities_master is None:
             securities_master = pd.read_csv(args.listings_file).set_index("ConId").sort_index()
             # Remove all unused entries for performance improvements
-            securities_master = securities_master[securities_master.index.isin(list(prices.columns))]
+            securities_master = securities_master[securities_master.index.isin(set(prices.columns))]
             with open("securities_master.bin", "wb") as f:
                 pickle.dump(securities_master, f, protocol=pickle.HIGHEST_PROTOCOL)
 
