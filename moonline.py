@@ -652,7 +652,6 @@ class CapeShillerETFsUS(MoonLineStrategy):
 
         for asset, weight in etfs.items():
             self.order_target_percent(asset, weight)
-        # self.order_target_percent(self.CAPE_SHILLER_STOCK, 0.0)
 
     def handle_data(self, data):
         pass
