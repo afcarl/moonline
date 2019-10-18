@@ -422,10 +422,17 @@ class MoonLineStrategy(ABC):
 
     def order_target_percent(self, asset, percentage):
         if self.mode == StrategyMode.INTRADAY:
-            self.orders[asset.conid][(pd.Timestamp(self.current_datetime.date()),
-                                      self.current_datetime.time())] = percentage
+            if asset.ignore_exchange:
+                self.orders[asset.symbol][(pd.Timestamp(self.current_datetime.date()),
+                                          self.current_datetime.time())] = percentage
+            else:
+                self.orders[asset.conid][(pd.Timestamp(self.current_datetime.date()),
+                                          self.current_datetime.time())] = percentage
         elif self.mode == StrategyMode.DAILY:
-            self.orders[asset.conid][(pd.Timestamp(self.current_datetime.date()))] = percentage
+            if asset.ignore_exchange:
+                self.orders[asset.symbol][(pd.Timestamp(self.current_datetime.date()))] = percentage
+            else:
+                self.orders[asset.conid][(pd.Timestamp(self.current_datetime.date()))] = percentage
 
     def generate_signals(self):
         df = pd.DataFrame(data=self.orders)
@@ -434,7 +441,10 @@ class MoonLineStrategy(ABC):
             df.index.names = ("Date", "Time")
         elif self.mode == StrategyMode.DAILY:
             df.index.names = ("Date",)
-        df.columns = df.columns.map(int)
+        try:
+            df.columns = df.columns.map(int)
+        except:
+            df.columns = df.columns.map(str)
 
         now = arrow.utcnow().to(self.timezone)
         if self.mode == StrategyMode.INTRADAY:
@@ -467,18 +477,19 @@ class MoonLineStrategy(ABC):
         pass
 
 
-class CapeShillerETFsEU(MoonLineStrategy):
+class CapeShillerETFsUS(MoonLineStrategy):
 
     FORCE_TRADE = [arrow.get("2019-07-25")]
 
-    CALENDAR = "LSE"
-    CAPE_SHILLER_STOCK = Asset("SPY", "ARCA")
-    QQQ3 = Asset("QQQ3", "LSE")
-    GDX = Asset("GDX", "LSE")
-    LUTR = Asset("LUTR", "LSEETF")
-    TRS5 = Asset("TRS5", "LSEETF")
-    THREEUSL = Asset("3USL", "LSE")
-    SPXS = Asset("SPXS", "LSEETF")
+    CALENDAR = "NYSE"
+    CAPE_SHILLER_STOCK = Asset("SPY", ignore_exchange=True)
+    RETL = Asset("RETL", ignore_exchange=True)
+    NUGT = Asset("NUGT", ignore_exchange=True)
+    TMF = Asset("TMF", ignore_exchange=True)
+    TYD = Asset("TYD", ignore_exchange=True)
+    SPXS = Asset("SPXS", ignore_exchange=True)
+    SPXL = Asset("SPXL", ignore_exchange=True)
+    TECL = Asset("TECL", ignore_exchange=True)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -497,7 +508,7 @@ class CapeShillerETFsEU(MoonLineStrategy):
                                                                     "script_data",
                                                                     "cape_shiller_data.csv"))
         else:
-            self.cape_shiller_data = pd.read_csv("../data/cape_shiller_data.csv")
+            self.cape_shiller_data = pd.read_csv("cape_shiller_data.csv")
         self.cape_shiller_data = self.cape_shiller_data.set_index("Date")
         self.cape_shiller_data.index = pd.to_datetime(self.cape_shiller_data.index, format="%Y-%m-%dT%H:%M:%S.%f")
 
@@ -583,74 +594,70 @@ class CapeShillerETFsEU(MoonLineStrategy):
         return regime
 
     def rebalance(self, data):
-        # TODO: This is just for testing to trigger the pipeline
-        # The strategy does not make use of this information
-        # selected = self.pipeline.get_universe(UniverseDefinition.Q500US)
-
         self.regime_check(data, force=False)
         regime = self.last_regime
         self.regime_data["date"].append(self.current_datetime.datetime)
         self.regime_data["regime"].append(regime)
 
-        # If any of the ETF's prices moved by more than 0.2%, allow trading, otherwise don't
-        prices = self.history.history(2)["Open"]
-        over_change_margin = prices.unstack("ConId").pct_change() > 0.002
-        if not over_change_margin.any(axis=None) and not self.current_datetime in self.FORCE_TRADE:
-            return
-
         if regime == 4:
             etfs = {
-                self.GDX: 0,
-                self.LUTR: 0,
-                self.TRS5: 0,
-                self.THREEUSL: 0.5,
+                self.RETL: 0,
+                self.NUGT: 0,
+                self.TMF: 0,
+                self.TYD: 0,
                 self.SPXS: 0,
-                self.QQQ3: 0.5,
+                self.SPXL: 0.5,
+                self.TECL: 0.5,
             }
         elif regime == 3:
             etfs = {
-                self.GDX: 0,
-                self.LUTR: 0,
-                self.TRS5: 0,
-                self.THREEUSL: 1.0,
+                self.RETL: 0,
+                self.NUGT: 0,
+                self.TMF: 0,
+                self.TYD: 0,
                 self.SPXS: 0,
-                self.QQQ3: 0,
+                self.SPXL: 1.0,
+                self.TECL: 0,
             }
         elif regime == 2:
             etfs = {
-                self.GDX: 0,
-                self.LUTR: 0.3,
-                self.TRS5: 0.2,
-                self.THREEUSL: 0.5,
+                self.RETL: 0,
+                self.NUGT: 0,
+                self.TMF: 0.3,
+                self.TYD: 0.2,
                 self.SPXS: 0,
-                self.QQQ3: 0,
+                self.SPXL: 0.5,
+                self.TECL: 0,
             }
         elif regime == 5:
             etfs = {
-                self.GDX: 0.4,
-                self.LUTR: 0,
-                self.TRS5: 0,
-                self.THREEUSL: 0.6,
+                self.RETL: 0,
+                self.NUGT: 0.4,
+                self.TMF: 0,
+                self.TYD: 0,
                 self.SPXS: 0,
-                self.QQQ3: 0,
+                self.SPXL: 0.6,
+                self.TECL: 0,
             }
         elif regime == 1:
             etfs = {
-                self.GDX: 0,
-                self.LUTR: 0.6,
-                self.TRS5: 0.4,
-                self.THREEUSL: 0,
+                self.RETL: 0,
+                self.NUGT: 0,
+                self.TMF: 0.6,
+                self.TYD: 0.4,
                 self.SPXS: 0,
-                self.QQQ3: 0,
+                self.SPXL: 0,
+                self.TECL: 0,
             }
         elif regime == 0:
             etfs = {
-                self.GDX: 0,
-                self.LUTR: 0,
-                self.TRS5: 0,
-                self.THREEUSL: -1.0,
-                self.SPXS: 0,
-                self.QQQ3: 0,
+                self.RETL: 0,
+                self.NUGT: 0,
+                self.TMF: 0,
+                self.TYD: 0,
+                self.SPXS: 1.0,
+                self.SPXL: 0,
+                self.TECL: 0,
             }
 
         for asset, weight in etfs.items():
@@ -702,7 +709,7 @@ class MoonLineContainer(Moonshot):
             shifted_prices.index.names = ["Date", "Time", "ConId"]
             history = History(history_data, frequency)
             pipeline = Pipeline()
-            strategy = CapeShillerETFsEU(mode=StrategyMode.INTRADAY, history=history, pipeline=pipeline)
+            strategy = CapeShillerETFsUS(mode=StrategyMode.INTRADAY, history=history, pipeline=pipeline)
 
         # Main Loop
         with timeit("Running backtest"):
@@ -734,7 +741,8 @@ class MoonLineContainer(Moonshot):
             for date, conid in tqdm(index_values, total=len(index_values), unit="rows"):
                 new_tuples.append((pd.to_datetime(date, format="%Y-%m-%d"), conid))
             history_data.index = pd.MultiIndex.from_tuples(new_tuples, names=["Datetime", "ConId"])
-            history_data.index = pd.MultiIndex.from_tuples([(x[0], Asset(int(x[1]))) for x in history_data.index])
+            history_data.index = pd.MultiIndex.from_tuples(
+                [(x[0], Asset(x[1], ignore_exchange=True)) for x in history_data.index])
 
         # Figure out bar size
         dates = shifted_prices.index.levels[0]
@@ -756,11 +764,12 @@ class MoonLineContainer(Moonshot):
 
         # Prepare DataFrame and required objects
         with timeit("Initializing strategy and history objects"):
-            shifted_prices.index = pd.MultiIndex.from_tuples([(x[0], Asset(int(x[1]))) for x in shifted_prices.index])
+            shifted_prices.index = pd.MultiIndex.from_tuples(
+                [(x[0], Asset(x[1], ignore_exchange=True)) for x in shifted_prices.index])
             shifted_prices.index.names = ["Date", "ConId"]
             history = History(history_data, frequency)
             pipeline = Pipeline()
-            strategy = CapeShillerETFsEU(mode=StrategyMode.DAILY, history=history, pipeline=pipeline)
+            strategy = CapeShillerETFsUS(mode=StrategyMode.DAILY, history=history, pipeline=pipeline)
 
         # Main Loop
         with timeit("Running backtest"):
@@ -832,8 +841,11 @@ class MoonLineContainer(Moonshot):
             closes = prices.loc["Close"].bfill().ffill().xs("15:45:00", level="Time")
         else:
             closes = prices.loc["Close"].bfill().ffill()
-        closes.columns = pd.to_numeric(closes.columns)
-        positions.columns = pd.to_numeric(positions.columns)
+        try:
+            closes.columns = pd.to_numeric(closes.columns)
+            positions.columns = pd.to_numeric(positions.columns)
+        except:
+            pass
         gross_returns = closes.pct_change() * positions.shift()
         gross_returns.index.name = "Date"
         return gross_returns
@@ -849,7 +861,7 @@ class UniverseDefinition(Enum):
 class Pipeline():
 
     def __init__(self):
-        self.client = pms.Client(args.database)
+        # self.client = pms.Client(args.database)
         self.last_result = {}
         self.last_time = None
         self.last_month = None
@@ -933,64 +945,28 @@ class Pipeline():
 
 
 def main(args):
-    if args.database:
-        with timeit("Loading price data from database"):
-            client = pms.Client(args.database)
-
-            symbol_data_files = {}
-
-            requested_assets = {asset.symbol: str(asset.conid) for asset in Asset}
-
-            if args.start_date and args.end_date:
-                result = client.query(pms.Params(list(requested_assets.keys()), "1D", "OHLCV",
-                                                 start=str(args.start_date), end=str(args.end_date))).all()
-            elif args.start_date and not args.end_date:
-                result = client.query(pms.Params(list(requested_assets.keys()), "1D",
-                                                 "OHLCV", start=str(args.start_date))).all()
-            elif not args.start_date and args.end_date:
-                result = client.query(pms.Params(list(requested_assets.keys()),
-                                                 "1D", "OHLCV", end=str(args.end_date))).all()
-
-            for symbol, data in result.items():
-                symbol = symbol.split("/")[0]
-                symbol_data_files[requested_assets[symbol]] = data.df()
-
-            proto_df = {}
-            for symbol, data in symbol_data_files.items():
-                for index, row in data.iterrows():
-                    date = arrow.get(index, tzinfo="Europe/London")
-                    proto_df[(symbol, date.format("YYYY-MM-DD"))] = row.values
-
-            prices = pd.DataFrame.from_dict(proto_df, orient="index", columns=[
-                                            "Open", "High", "Low", "Close", "Volume"])
-            prices.index = pd.MultiIndex.from_tuples(prices.index)
-            prices.index.names = ["ConId", "Date"]
-            prices.columns.name = "Field"
-            prices = prices.stack().unstack("ConId").swaplevel(0, 1).sort_index()
+    if args.pystore_dir:
+        from data_providers import PyStoreDataProvider
+        with timeit("Loading price data using PyStoreDataProvider"):
+            data_provider = PyStoreDataProvider(args.pystore_dir)
+            prices = data_provider.get_ohlcv([asset.symbol for asset in Asset],
+                                             start=args.start_date, end=args.end_date)
+    elif args.quantrocket_file:
+        from data_providers import QuantRocketDataProvider
+        with timeit("Loading price data using QuantRocketDataProvider"):
+            data_provider = QuantRocketDataProvider(args.quantrocket_file)
+            data_provider.ingest()
+            prices = data_provider.get_ohlcv([asset.symbol for asset in Asset],
+                                             start=args.start_date, end=args.end_date)
     else:
-        with timeit("Loading price data from disk"):
-            prices = pd.read_csv(args.input_file)
-            indexes = ["Field", "Date"]
-            if "Time" in list(prices.columns):
-                indexes = ["Field", "Date", "Time"]
-            prices = prices.set_index(indexes).sort_index()
-            if args.start_date and args.end_date:
-                prices = prices.loc[pd.IndexSlice[:, str(args.start_date):str(args.end_date), :], :]
-            elif args.start_date and not args.end_date:
-                prices = prices.loc[pd.IndexSlice[:, str(args.start_date):, :], :]
-            elif not args.start_date and args.end_date:
-                prices = prices.loc[pd.IndexSlice[:, :str(args.end_date), :], :]
-            prices.columns.name = "ConId"
-
-            # Figure out the first row where all column values are present
-            # first_no_nan_date = prices.loc[~prices.isnull().sum(1).astype(bool)].iloc[0].name[1]
-
-            # Deduplicate index (apparently some QuantRocket exports contain duplicate rows)
-            duplicates = prices.index.duplicated(keep="last")
-            prices = prices.loc[duplicates == False, :]
+        print("No valid data provider was specified")
+        sys.exit(1)
 
     try:
-        arrow.get(prices.index.levels[1][0], "YYYY-MM-DD")
+        try:
+            arrow.get(prices.index.levels[1][0], "YYYY-MM-DD")
+        except:
+            arrow.get(prices.index.levels[1][0].strftime("%Y-%m-%d"), "YYYY-MM-DD")
     except arrow.parser.ParserMatchError:
         print("The input data is in an unsupported format.\nPlease double-check your input files.")
         sys.exit(1)
@@ -1081,10 +1057,6 @@ def main(args):
 
 
 def check(args):
-    if args.input_file and not os.path.isfile(args.input_file):
-        print("The input file does not exist!")
-        sys.exit(1)
-
     if os.path.isfile(args.output_file):
         if not args.yes:
             print("The output file exists. Do you want to overwrite it?")
@@ -1119,14 +1091,15 @@ def check(args):
 if __name__ == '__main__':
     import sys
     import argparse
-    import pymarketstore as pms
 
     ### Charting Libraries ###
     from moonchart import Tearsheet
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--input", type=str, dest="input_file",
-                        metavar="prices.csv", help="A CSV file containing price data to backtest on")
+    parser.add_argument("-q", "--quantrocket", type=str, dest="quantrocket_file",
+                        metavar="prices.csv", help="A CSV file containing quantrocket-formatted price data")
+    parser.add_argument("-p", "--pystore", type=str, dest="pystore_dir",
+                        metavar="dir", help="The directory containing PyStore data")
     parser.add_argument("-l", "--listings", type=str, dest="listings_file", required=True,
                         metavar="listings.csv", help="The file containing InteractiveBrokers listings data")
     parser.add_argument("-s", "--start-date", type=str, dest="start_date",
@@ -1137,8 +1110,6 @@ if __name__ == '__main__':
                         metavar="results.csv", help="The file to output backtest results to")
     parser.add_argument("-w", "--weights", type=str, dest="weights_file",
                         metavar="weights.csv", help="The file to save calculated weights to")
-    parser.add_argument("-d", "--database", type=str, dest="database",
-                        metavar="URL", help="The connection string to the price database")
     parser.add_argument("-y", "--yes", action="store_true", dest="yes",
                         help="If given, automatically answers script questions with 'yes'")
     parser.add_argument("-c", "--clear-cache", action="store_true", dest="clear_cache",

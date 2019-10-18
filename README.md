@@ -17,7 +17,7 @@ If you do not want to use `poetry`, you can install the requirements manually vi
 ### Running
 To run MoonLine using `poetry`, use the following command:
 ```bash
-$ poetry run python moonline.py -i <price_data> -l <listings_data> <...optional arguments>
+$ poetry run python moonline.py -q <price_data> -l <listings_data> <...optional arguments>
 ```
 
 Alternatively you can just run it with your regular Python installation. However, **beware of the fact that MoonLine is being developed on Python 3.7** and as such, lower version may not work. It is recommended to use [pyenv](https://github.com/pyenv/pyenv) to manage Python versions on your local machine.
@@ -74,7 +74,7 @@ class MyStrategy(MoonLineStrategy):
 
 ### On Data
 MoonLine supports multiple input formats for data, which will be expanded in the future as well. Currently, it is advised to use the QuantRocket-inspired format as it is the most robust.  
-This format of data is ingested via the `-i` switch and consists of a singular CSV file containing the price data for one or more assets. MoonLine supports both end-of-day as well as intraday input files. These differ mainly in that intraday price files contain an additional index level called "Time".  
+This format of data is ingested via the `-q` switch and consists of a singular CSV file containing the price data for one or more assets. MoonLine supports both end-of-day as well as intraday input files. These differ mainly in that intraday price files contain an additional index level called "Time".  
 As long as it is possible to create a CSV file with the structure as shown below, MoonLine will be able to ingest it and use the contained data for backtesting.
 
 #### Asset Names and ConId's
@@ -88,13 +88,20 @@ spy = Asset("SPY", "ARCA")
 # or
 # the below is only possible if no conflicting exchanges are found and may raise an Exception
 spy = Asset("SPY")
+# or (NEW)
+# same as the above, but will not throw an Exception
+# this also comes with the caveat that no metadata will be gathered for this object
+spy = Asset("SPY", ignore_exchange=True)
 # or
 spy = Asset(756733)
 # or
 spy = Asset("756733")
 ```
 
-**Notice:** It is inteded to slowly transition away from this dependency on InteractiveBrokers, however no satisfying alternative for the required data has been found yet, so this might take a while.
+**Notice:** It is inteded to slowly transition away from this dependency on InteractiveBrokers, however this might take a while.
+It is currently possibly to test-drive the removal of InteractiveBrokers ConId's by setting `ignore_exchange=True` during Asset creation.
+The currently implemented sample algorithm uses this InteractiveBrokers-free method to showcase how it works.  
+It is important to note that in case of using `ignore_exchange=True`, the input data's column names must be symbol names instead of ConId's.
 
 Because of this dependency, MoonLine requires the full listings catalogue of InteractiveBrokers to reference asset metadata at runtime. This is ingested via the `-l` switch.
 
@@ -176,14 +183,16 @@ Volume,2009-05-20,16:15:00,73234500.0
 
 ## Usage
 ```bash
-usage: moonline.py [-h] [-i prices.csv] -l listings.csv [-s YYYY-MM-DD]
-                   [-e YYYY-MM-DD] [-o results.csv] [-w weights.csv] [-d URL]
-                   [-y] [-c]
+usage: moonline.py [-h] [-q prices.csv] [-p dir] -l listings.csv
+                   [-s YYYY-MM-DD] [-e YYYY-MM-DD] [-o results.csv]
+                   [-w weights.csv] [-y] [-c]
 
 optional arguments:
   -h, --help            show this help message and exit
-  -i prices.csv, --input prices.csv
-                        A CSV file containing price data to backtest on
+  -q prices.csv, --quantrocket prices.csv
+                        A CSV file containing quantrocket-formatted price data
+  -p dir, --pystore dir
+                        The directory containing PyStore data
   -l listings.csv, --listings listings.csv
                         The file containing InteractiveBrokers listings data
   -s YYYY-MM-DD, --start-date YYYY-MM-DD
@@ -194,8 +203,6 @@ optional arguments:
                         The file to output backtest results to
   -w weights.csv, --weights weights.csv
                         The file to save calculated weights to
-  -d URL, --database URL
-                        The connection string to the price database
   -y, --yes             If given, automatically answers script questions with
                         'yes'
   -c, --clear-cache     If given, ignores cached data
