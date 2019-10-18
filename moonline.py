@@ -1089,7 +1089,6 @@ def check(args):
 if __name__ == '__main__':
     import sys
     import argparse
-    import pymarketstore as pms
 
     ### Charting Libraries ###
     from moonchart import Tearsheet
