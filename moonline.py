@@ -422,10 +422,17 @@ class MoonLineStrategy(ABC):
 
     def order_target_percent(self, asset, percentage):
         if self.mode == StrategyMode.INTRADAY:
-            self.orders[asset.conid][(pd.Timestamp(self.current_datetime.date()),
-                                      self.current_datetime.time())] = percentage
+            if asset.ignore_exchange:
+                self.orders[asset.symbol][(pd.Timestamp(self.current_datetime.date()),
+                                          self.current_datetime.time())] = percentage
+            else:
+                self.orders[asset.conid][(pd.Timestamp(self.current_datetime.date()),
+                                          self.current_datetime.time())] = percentage
         elif self.mode == StrategyMode.DAILY:
-            self.orders[asset.conid][(pd.Timestamp(self.current_datetime.date()))] = percentage
+            if asset.ignore_exchange:
+                self.orders[asset.symbol][(pd.Timestamp(self.current_datetime.date()))] = percentage
+            else:
+                self.orders[asset.conid][(pd.Timestamp(self.current_datetime.date()))] = percentage
 
     def generate_signals(self):
         df = pd.DataFrame(data=self.orders)
@@ -434,7 +441,10 @@ class MoonLineStrategy(ABC):
             df.index.names = ("Date", "Time")
         elif self.mode == StrategyMode.DAILY:
             df.index.names = ("Date",)
-        df.columns = df.columns.map(int)
+        try:
+            df.columns = df.columns.map(int)
+        except:
+            df.columns = df.columns.map(str)
 
         now = arrow.utcnow().to(self.timezone)
         if self.mode == StrategyMode.INTRADAY:
@@ -731,7 +741,8 @@ class MoonLineContainer(Moonshot):
             for date, conid in tqdm(index_values, total=len(index_values), unit="rows"):
                 new_tuples.append((pd.to_datetime(date, format="%Y-%m-%d"), conid))
             history_data.index = pd.MultiIndex.from_tuples(new_tuples, names=["Datetime", "ConId"])
-            history_data.index = pd.MultiIndex.from_tuples([(x[0], Asset(x[1], ignore_exchange=True)) for x in history_data.index])
+            history_data.index = pd.MultiIndex.from_tuples(
+                [(x[0], Asset(x[1], ignore_exchange=True)) for x in history_data.index])
 
         # Figure out bar size
         dates = shifted_prices.index.levels[0]
@@ -753,7 +764,8 @@ class MoonLineContainer(Moonshot):
 
         # Prepare DataFrame and required objects
         with timeit("Initializing strategy and history objects"):
-            shifted_prices.index = pd.MultiIndex.from_tuples([(x[0], Asset(x[1], ignore_exchange=True)) for x in shifted_prices.index])
+            shifted_prices.index = pd.MultiIndex.from_tuples(
+                [(x[0], Asset(x[1], ignore_exchange=True)) for x in shifted_prices.index])
             shifted_prices.index.names = ["Date", "ConId"]
             history = History(history_data, frequency)
             pipeline = Pipeline()
@@ -829,8 +841,11 @@ class MoonLineContainer(Moonshot):
             closes = prices.loc["Close"].bfill().ffill().xs("15:45:00", level="Time")
         else:
             closes = prices.loc["Close"].bfill().ffill()
-        closes.columns = pd.to_numeric(closes.columns)
-        positions.columns = pd.to_numeric(positions.columns)
+        try:
+            closes.columns = pd.to_numeric(closes.columns)
+            positions.columns = pd.to_numeric(positions.columns)
+        except:
+            pass
         gross_returns = closes.pct_change() * positions.shift()
         gross_returns.index.name = "Date"
         return gross_returns
@@ -934,13 +949,15 @@ def main(args):
         from data_providers import PyStoreDataProvider
         with timeit("Loading price data using PyStoreDataProvider"):
             data_provider = PyStoreDataProvider(args.pystore_dir)
-            prices = data_provider.get_ohlcv([asset.symbol for asset in Asset])
+            prices = data_provider.get_ohlcv([asset.symbol for asset in Asset],
+                                             start=args.start_date, end=args.end_date)
     elif args.quantrocket_file:
         from data_providers import QuantRocketDataProvider
         with timeit("Loading price data using QuantRocketDataProvider"):
             data_provider = QuantRocketDataProvider(args.quantrocket_file)
             data_provider.ingest()
-            prices = data_provider.get_ohlcv([asset.conid for asset in Asset])
+            prices = data_provider.get_ohlcv([asset.symbol for asset in Asset],
+                                             start=args.start_date, end=args.end_date)
     else:
         print("No valid data provider was specified")
         sys.exit(1)

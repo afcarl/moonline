@@ -56,11 +56,12 @@ class PyStoreDataProvider(DataProvider):
         result = result.swaplevel(0, 1).sort_index()
 
         if start and end:
-            result = result.loc[pd.IndexSlice[:, str(start):str(end), :], :]
+            result = result.loc[pd.IndexSlice[:, start.format(
+                "YYYY-MM-DD HH:mm:ss"):end.format("YYYY-MM-DD HH:mm:ss"), :], :]
         elif start and not end:
-            result = result.loc[pd.IndexSlice[:, str(start):, :], :]
+            result = result.loc[pd.IndexSlice[:, start.format("YYYY-MM-DD HH:mm:ss"):, :], :]
         elif not start and end:
-            result = result.loc[pd.IndexSlice[:, :str(end), :], :]
+            result = result.loc[pd.IndexSlice[:, :end.format("YYYY-MM-DD HH:mm:ss"), :], :]
 
         result.index = result.index.map(lambda x: (x[0].capitalize(),) + x[1:])
 
@@ -82,11 +83,12 @@ class PyStoreDataProvider(DataProvider):
             result[symbols] = df.stack()
 
         if start and end:
-            result = result.loc[pd.IndexSlice[str(start):str(end), ], :]
+            result = result.loc[pd.IndexSlice[start.format(
+                "YYYY-MM-DD HH:mm:ss"):end.format("YYYY-MM-DD HH:mm:ss"), ], :]
         elif start and not end:
-            result = result.loc[pd.IndexSlice[str(start):, ], :]
+            result = result.loc[pd.IndexSlice[start.format("YYYY-MM-DD HH:mm:ss"):, ], :]
         elif not start and end:
-            result = result.loc[pd.IndexSlice[:str(end), ], :]
+            result = result.loc[pd.IndexSlice[:end.format("YYYY-MM-DD HH:mm:ss"), ], :]
 
         result.index = result.index.map(lambda x: (x[0].capitalize(),) + x[1:])
 

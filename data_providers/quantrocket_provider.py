@@ -55,10 +55,11 @@ class QuantRocketDataProvider(DataProvider):
             result = self.prices[[str(symbols)]]
 
         if start and end:
-            result = result.loc[pd.IndexSlice[:, str(start):str(end), :], :]
+            result = result.loc[pd.IndexSlice[:, start.format(
+                "YYYY-MM-DD HH:mm:ss"):end.format("YYYY-MM-DD HH:mm:ss"), :], :]
         elif start and not end:
-            result = result.loc[pd.IndexSlice[:, str(start):, :], :]
+            result = result.loc[pd.IndexSlice[:, start.format("YYYY-MM-DD HH:mm:ss"):, :], :]
         elif not start and end:
-            result = result.loc[pd.IndexSlice[:, :str(end), :], :]
+            result = result.loc[pd.IndexSlice[:, :end.format("YYYY-MM-DD HH:mm:ss"), :], :]
 
         return result
