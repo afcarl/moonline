@@ -472,14 +472,14 @@ class CapeShillerETFsUS(MoonLineStrategy):
     FORCE_TRADE = [arrow.get("2019-07-25")]
 
     CALENDAR = "NYSE"
-    CAPE_SHILLER_STOCK = Asset("SPY", "ARCA")
-    RETL = Asset("RETL", "ARCA")
-    NUGT = Asset("NUGT", "ARCA")
-    TMF = Asset("TMF", "ARCA")
-    TYD = Asset("TYD", "ARCA")
-    SPXS = Asset("SPXS", "ARCA")
-    SPXL = Asset("SPXL", "ARCA")
-    TECL = Asset("TECL", "ARCA")
+    CAPE_SHILLER_STOCK = Asset("SPY", ignore_exchange=True)
+    RETL = Asset("RETL", ignore_exchange=True)
+    NUGT = Asset("NUGT", ignore_exchange=True)
+    TMF = Asset("TMF", ignore_exchange=True)
+    TYD = Asset("TYD", ignore_exchange=True)
+    SPXS = Asset("SPXS", ignore_exchange=True)
+    SPXL = Asset("SPXL", ignore_exchange=True)
+    TECL = Asset("TECL", ignore_exchange=True)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
