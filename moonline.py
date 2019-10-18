@@ -492,13 +492,13 @@ class CapeShillerETFsUS(MoonLineStrategy):
         self.last_regime = 3
         self.regime_data = defaultdict(list)
         self.cape_history = []
-        if is_quantrocket:
+        if is_quantrocket():
             self.cape_shiller_data = pd.read_csv("/" + os.path.join("codeload",
                                                                     "satellite_scripts",
                                                                     "script_data",
                                                                     "cape_shiller_data.csv"))
         else:
-            self.cape_shiller_data = pd.read_csv("data/cape_shiller_data.csv")
+            self.cape_shiller_data = pd.read_csv("cape_shiller_data.csv")
         self.cape_shiller_data = self.cape_shiller_data.set_index("Date")
         self.cape_shiller_data.index = pd.to_datetime(self.cape_shiller_data.index, format="%Y-%m-%dT%H:%M:%S.%f")
 
@@ -846,7 +846,7 @@ class UniverseDefinition(Enum):
 class Pipeline():
 
     def __init__(self):
-        self.client = pms.Client(args.database)
+        # self.client = pms.Client(args.database)
         self.last_result = {}
         self.last_time = None
         self.last_month = None
@@ -932,29 +932,18 @@ class Pipeline():
 def main(args):
     if args.pystore_dir:
         from data_providers import PyStoreDataProvider
-        data_provider = PyStoreDataProvider(args.pystore_dir)
-        prices = data_provider.get_ohlcv([asset.symbol for asset in Asset])
+        with timeit("Loading price data using PyStoreDataProvider"):
+            data_provider = PyStoreDataProvider(args.pystore_dir)
+            prices = data_provider.get_ohlcv([asset.symbol for asset in Asset])
+    elif args.quantrocket_file:
+        from data_providers import QuantRocketDataProvider
+        with timeit("Loading price data using QuantRocketDataProvider"):
+            data_provider = QuantRocketDataProvider(args.quantrocket_file)
+            data_provider.ingest()
+            prices = data_provider.get_ohlcv([asset.conid for asset in Asset])
     else:
-        with timeit("Loading price data from disk"):
-            prices = pd.read_csv(args.input_file)
-            indexes = ["Field", "Date"]
-            if "Time" in list(prices.columns):
-                indexes = ["Field", "Date", "Time"]
-            prices = prices.set_index(indexes).sort_index()
-            if args.start_date and args.end_date:
-                prices = prices.loc[pd.IndexSlice[:, str(args.start_date):str(args.end_date), :], :]
-            elif args.start_date and not args.end_date:
-                prices = prices.loc[pd.IndexSlice[:, str(args.start_date):, :], :]
-            elif not args.start_date and args.end_date:
-                prices = prices.loc[pd.IndexSlice[:, :str(args.end_date), :], :]
-            prices.columns.name = "ConId"
-
-            # Figure out the first row where all column values are present
-            # first_no_nan_date = prices.loc[~prices.isnull().sum(1).astype(bool)].iloc[0].name[1]
-
-            # Deduplicate index (apparently some QuantRocket exports contain duplicate rows)
-            duplicates = prices.index.duplicated(keep="last")
-            prices = prices.loc[duplicates == False, :]
+        print("No valid data provider was specified")
+        sys.exit(1)
 
     try:
         try:
@@ -1051,10 +1040,6 @@ def main(args):
 
 
 def check(args):
-    if args.input_file and not os.path.isfile(args.input_file):
-        print("The input file does not exist!")
-        sys.exit(1)
-
     if os.path.isfile(args.output_file):
         if not args.yes:
             print("The output file exists. Do you want to overwrite it?")
@@ -1094,8 +1079,10 @@ if __name__ == '__main__':
     from moonchart import Tearsheet
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--input", type=str, dest="input_file",
-                        metavar="prices.csv", help="A CSV file containing price data to backtest on")
+    parser.add_argument("-q", "--quantrocket", type=str, dest="quantrocket_file",
+                        metavar="prices.csv", help="A CSV file containing quantrocket-formatted price data")
+    parser.add_argument("-p", "--pystore", type=str, dest="pystore_dir",
+                        metavar="dir", help="The directory containing PyStore data")
     parser.add_argument("-l", "--listings", type=str, dest="listings_file", required=True,
                         metavar="listings.csv", help="The file containing InteractiveBrokers listings data")
     parser.add_argument("-s", "--start-date", type=str, dest="start_date",
@@ -1106,8 +1093,6 @@ if __name__ == '__main__':
                         metavar="results.csv", help="The file to output backtest results to")
     parser.add_argument("-w", "--weights", type=str, dest="weights_file",
                         metavar="weights.csv", help="The file to save calculated weights to")
-    parser.add_argument("-p", "--pystore", type=str, dest="pystore_dir",
-                        metavar="dir", help="The directory containing PyStore data")
     parser.add_argument("-y", "--yes", action="store_true", dest="yes",
                         help="If given, automatically answers script questions with 'yes'")
     parser.add_argument("-c", "--clear-cache", action="store_true", dest="clear_cache",

@@ -1,3 +1,6 @@
+### Data Handling ###
+import pandas as pd
+
 ### Local ###
 from .base import DataProvider
 
@@ -18,19 +21,44 @@ class QuantRocketDataProvider(DataProvider):
         if "Time" in list(prices.columns):
             indexes = ["Field", "Date", "Time"]
         prices = prices.set_index(indexes).sort_index()
-        if args.start_date and args.end_date:
-            prices = prices.loc[pd.IndexSlice[:, str(args.start_date):str(args.end_date), :], :]
-        elif args.start_date and not args.end_date:
-            prices = prices.loc[pd.IndexSlice[:, str(args.start_date):, :], :]
-        elif not args.start_date and args.end_date:
-            prices = prices.loc[pd.IndexSlice[:, :str(args.end_date), :], :]
         prices.columns.name = "ConId"
-
-        # Figure out the first row where all column values are present
-        # first_no_nan_date = prices.loc[~prices.isnull().sum(1).astype(bool)].iloc[0].name[1]
 
         # Deduplicate index (apparently some QuantRocket exports contain duplicate rows)
         duplicates = prices.index.duplicated(keep="last")
         prices = prices.loc[duplicates == False, :]
 
         self.prices = prices
+        self.available_symbols = self.list_symbols()
+
+    def validate_symbols(self, symbols):
+        if isinstance(symbols, list):
+            missing_symbols = set(map(str, symbols)) - self.available_symbols
+            if missing_symbols:
+                raise Exception("The symbol{} {} {} not available".format("s" if len(missing_symbols) > 1 else "",
+                                                                          ", ".join(missing_symbols),
+                                                                          "are" if len(missing_symbols) > 1 else "is"))
+        elif str(symbols) not in self.available_symbols:
+            raise Exception("{} is not available".format(symbols))
+
+    def list_symbols(self):
+        return set(self.prices.columns)
+
+    def get_ohlcv(self, symbols=None, start=None, end=None):
+        if symbols:
+            self.validate_symbols(symbols)
+        else:
+            symbols = self.available_symbols
+
+        if isinstance(symbols, list):
+            result = self.prices[map(str, symbols)]
+        else:
+            result = self.prices[[str(symbols)]]
+
+        if start and end:
+            result = result.loc[pd.IndexSlice[:, str(start):str(end), :], :]
+        elif start and not end:
+            result = result.loc[pd.IndexSlice[:, str(start):, :], :]
+        elif not start and end:
+            result = result.loc[pd.IndexSlice[:, :str(end), :], :]
+
+        return result

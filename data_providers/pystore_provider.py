@@ -62,6 +62,8 @@ class PyStoreDataProvider(DataProvider):
         elif not start and end:
             result = result.loc[pd.IndexSlice[:, :str(end), :], :]
 
+        result.index = result.index.map(lambda x: (x[0].capitalize(),) + x[1:])
+
         return result
 
     def get_fundamentals(self, symbols=None, start=None, end=None):
@@ -85,5 +87,7 @@ class PyStoreDataProvider(DataProvider):
             result = result.loc[pd.IndexSlice[str(start):, ], :]
         elif not start and end:
             result = result.loc[pd.IndexSlice[:str(end), ], :]
+
+        result.index = result.index.map(lambda x: (x[0].capitalize(),) + x[1:])
 
         return result
