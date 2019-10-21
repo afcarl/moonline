@@ -387,10 +387,9 @@ class MoonLineStrategy(ABC):
 
     CALENDAR = "NYSE"
 
-    def __init__(self, mode, history, pipeline):
+    def __init__(self, mode, history):
         self.mode = mode
         self.history = history
-        self.pipeline = pipeline
         self.scheduled_methods = []
         self.current_datetime = None
         self.orders = defaultdict(dict)
@@ -424,7 +423,7 @@ class MoonLineStrategy(ABC):
         if self.mode == StrategyMode.INTRADAY:
             if asset.ignore_exchange:
                 self.orders[asset.symbol][(pd.Timestamp(self.current_datetime.date()),
-                                          self.current_datetime.time())] = percentage
+                                           self.current_datetime.time())] = percentage
             else:
                 self.orders[asset.conid][(pd.Timestamp(self.current_datetime.date()),
                                           self.current_datetime.time())] = percentage
@@ -494,6 +493,7 @@ class CapeShillerETFsUS(MoonLineStrategy):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.last_price = 0
+        self.history = Pipeline(UniverseDefinition.Q500US)
 
         self.schedule_interval(self.rebalance, "D", 1)
         self.schedule_interval(self.cape_check, "M", 1)
@@ -708,8 +708,7 @@ class MoonLineContainer(Moonshot):
                                                               for x in shifted_prices.index])
             shifted_prices.index.names = ["Date", "Time", "ConId"]
             history = History(history_data, frequency)
-            pipeline = Pipeline()
-            strategy = CapeShillerETFsUS(mode=StrategyMode.INTRADAY, history=history, pipeline=pipeline)
+            strategy = CapeShillerETFsUS(mode=StrategyMode.INTRADAY, history=history)
 
         # Main Loop
         with timeit("Running backtest"):
@@ -722,8 +721,6 @@ class MoonLineContainer(Moonshot):
                     data = time_data.loc[time_index]
                     # Update the History object
                     history.update_time(datetime)
-                    # Update the Pipeline object
-                    pipeline.update_time(datetime)
                     # Run the main data handling function
                     strategy.run_handle_data(datetime, data=data)
                     # Run all scheduled functions
@@ -768,8 +765,7 @@ class MoonLineContainer(Moonshot):
                 [(x[0], Asset(x[1], ignore_exchange=True)) for x in shifted_prices.index])
             shifted_prices.index.names = ["Date", "ConId"]
             history = History(history_data, frequency)
-            pipeline = Pipeline()
-            strategy = CapeShillerETFsUS(mode=StrategyMode.DAILY, history=history, pipeline=pipeline)
+            strategy = CapeShillerETFsUS(mode=StrategyMode.DAILY, history=history)
 
         # Main Loop
         with timeit("Running backtest"):
@@ -780,8 +776,6 @@ class MoonLineContainer(Moonshot):
                 data = day_data.loc[day_index]
                 # Update the History object
                 history.update_time(datetime)
-                # Update the Pipeline object
-                pipeline.update_time(datetime)
                 # Run the main data handling function
                 strategy.run_handle_data(datetime, data=data)
                 # Run all scheduled functions
@@ -943,6 +937,19 @@ class Pipeline():
         # TODO: return OHLCV values instead of just the tickers
         return self.last_result[universe_definition]
 
+    def current(self):
+        """Return the current set of values at algorithm time."""
+        return self.history(1)
+
+    def history(self, bar_count, frequency=None):
+        """Emulate History() behavior."""
+        selected_stocks = self.get_universe()
+        # TODO: Figure out the start date such that we get bar_count bars in return, based on the frequency
+        calculated_start = None
+        data = data_provider.get_ohlcv(selected_stocks, start=calculated_start, end=self.current_datetime)
+        # TODO: Resample if necessary
+        return data
+
 
 def main(args):
     if args.pystore_dir:
@@ -1013,7 +1020,7 @@ def main(args):
                        Turnover=turnover, TotalHoldings=total_holdings,
                        Commission=commissions, Slippage=slippages, Return=returns)
 
-    # validate that custom backtest results are daily if results are daily
+    # Validate that custom backtest results are daily if results are daily
     for custom_name, custom_df in cs._backtest_results.items():
         if "Time" in custom_df.index.names and not results_are_intraday:
             raise Exception("custom DataFrame '{0}' won't concat properly with 'Time' in index, "
@@ -1041,7 +1048,7 @@ def main(args):
         symbols_with_conids = symbols.astype(str) + "(" + symbols.index.astype(str) + ")"
         results.rename(columns=symbols_with_conids.to_dict(), inplace=True)
 
-    # truncate at requested start_date
+    # Truncate at requested start_date
     if args.start_date:
         results = results.iloc[results.index.get_level_values(
             "Date") >= pd.Timestamp(args.start_date.format("YYYY-MM-DD"))]
