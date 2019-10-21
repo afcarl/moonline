@@ -943,12 +943,36 @@ class Pipeline():
 
     def history(self, bar_count, frequency=None):
         """Emulate History() behavior."""
+        if not frequency:
+            frequency = self.default_frequency
+
+        if bar_count <= 0:
+            raise Exception("You must request a positive amount of bars. Bars requested: {}".format(bar_count))
+
         selected_stocks = self.get_universe()
-        # TODO: Figure out the start date such that we get bar_count bars in return, based on the frequency
-        calculated_start = None
+
+        total_span = bar_count * frequency
+        calculated_start = self.current_datetime - arrow.get(total_span)
         data = data_provider.get_ohlcv(selected_stocks, start=calculated_start, end=self.current_datetime)
-        # TODO: Resample if necessary
-        return data
+
+        data = data.resample(frequency.time_string(), level=0).last().ffill().stack(level=1)
+        sliced_index = data.index.levels[0].to_series(keep_tz=True)[:self.current_datetime]
+        index_values = pd.DatetimeIndex(sliced_index)[-bar_count:]
+        sliced = data.loc[pd.IndexSlice[index_values, :], :]
+
+        new_tuples = []
+        reformatted_data = sliced.copy()
+        index_values = reformatted_data.index.tolist()
+        if frequency < HistoryFrequency.DAY_1:
+            for datetime, conid in index_values:
+                new_tuples.append((datetime.date(), datetime.time(), conid))
+            reformatted_data.index = pd.MultiIndex.from_tuples(new_tuples, names=["Date", "Time", "ConId"])
+        else:
+            for datetime, conid in index_values:
+                new_tuples.append((datetime.date(), conid))
+            reformatted_data.index = pd.MultiIndex.from_tuples(new_tuples, names=["Date", "ConId"])
+
+        return reformatted_data
 
 
 def main(args):
