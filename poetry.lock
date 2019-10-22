@@ -605,7 +605,7 @@ version = "1.0.0"
 heapdict = "*"
 
 [metadata]
-content-hash = "d69b6f9ea679befc4f631118c288c52ea2ea203b349b1682c3e49f01e8c599ff"
+content-hash = "338d91b8b071b06d583d831388f2b805917f5a69782a712a2cd4ee4d552ada80"
 python-versions = "^3.7"
 
 [metadata.hashes]

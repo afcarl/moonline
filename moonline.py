@@ -11,6 +11,7 @@ from glob import glob
 from enum import Enum, IntEnum
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from functools import total_ordering
 
 ### Local ###
 try:
@@ -79,8 +80,12 @@ class TimeScheduler():
         """
         self.mode = mode
         self.method = data.get("method")
-        self.calendar = tc.get_calendar(data.get("calendar"))
-        self.timezone = self.calendar.tz
+        try:
+            self.calendar = tc.get_calendar(data.get("calendar"))
+            self.timezone = self.calendar.tz
+        except:
+            self.calendar = None
+            self.timezone = None
 
         self.has_date = True
         self.has_time = False
@@ -104,7 +109,7 @@ class TimeScheduler():
             self.has_time = True
             self.datetime = data.get("time")
 
-        if self.datetime:
+        if self.datetime and self.timezone:
             self.datetime = self.datetime.replace(tzinfo=self.timezone).to("UTC")
 
     @classmethod
@@ -182,8 +187,12 @@ class TimeScheduler():
         Returns:
             bool: The return value. True for success, False otherwise.
         """
-        market_open, market_close = self.calendar.schedule.loc[current_datetime.date()]
-        market_open, market_close = arrow.get(market_open), arrow.get(market_close)
+        if self.calendar:
+            market_open, market_close = self.calendar.schedule.loc[current_datetime.date()]
+            market_open, market_close = arrow.get(market_open), arrow.get(market_close)
+        else:
+            market_open = arrow.get(current_datetime).replace(hour=9, minute=30, second=0)
+            market_close = arrow.get(current_datetime).replace(hour=17, minute=0, second=0)
         if time:
             # If we have been given data with a time index
             if not market_open.time() <= current_datetime.time() <= market_close.time():
@@ -200,6 +209,8 @@ class TimeScheduler():
         return True
 
     def check(self, time: str, current_datetime: datetime.datetime) -> bool:
+        if not self.calendar:
+            return True
         if current_datetime.date() in self.calendar.schedule.index:
             # Exchange is open
             if time and not self.time_check(time, current_datetime):
@@ -219,7 +230,8 @@ class TimeScheduler():
             current_datetime = arrow.get("{} {}".format(date, time), "YYYY-MM-DD HH:mm:ss")
         else:
             current_datetime = arrow.get(date, "YYYY-MM-DD")
-        current_datetime = current_datetime.replace(tzinfo=self.timezone).to("UTC")
+        if self.timezone:
+            current_datetime = current_datetime.replace(tzinfo=self.timezone).to("UTC")
 
         if self.mode == SchedulerMode.INTERVAL:
             # Interval Scheduling
@@ -227,6 +239,8 @@ class TimeScheduler():
                 if current_datetime.year in self.interval_list:
                     # We've already triggered this year
                     return False
+                if not self.calendar:
+                    return True
                 first_trading_day = arrow.get(self.calendar.schedule[str(current_datetime.year)].iloc[0][0])
                 if not current_datetime.date() == first_trading_day.date():
                     return False
@@ -235,6 +249,8 @@ class TimeScheduler():
                 if current_datetime.month in self.interval_list[current_datetime.year]:
                     # We've already triggered this month
                     return False
+                if not self.calendar:
+                    return True
                 first_trading_day = arrow.get(self.calendar.schedule[current_datetime.format("YYYY-MM")].iloc[0][0])
                 if not current_datetime.date() == first_trading_day.date():
                     return False
@@ -393,7 +409,10 @@ class MoonLineStrategy(ABC):
         self.scheduled_methods = []
         self.current_datetime = None
         self.orders = defaultdict(dict)
-        self.timezone = tc.get_calendar(self.CALENDAR).tz
+        if self.CALENDAR:
+            self.timezone = tc.get_calendar(self.CALENDAR).tz
+        else:
+            self.timezone = None
 
     def schedule_datetime(self, *args, **kwargs):
         if kwargs.get("calendar"):
@@ -421,14 +440,14 @@ class MoonLineStrategy(ABC):
 
     def order_target_percent(self, asset, percentage):
         if self.mode == StrategyMode.INTRADAY:
-            if asset.ignore_exchange:
+            if hasattr(asset, "ignore_exchange") and asset.ignore_exchange:
                 self.orders[asset.symbol][(pd.Timestamp(self.current_datetime.date()),
                                            self.current_datetime.time())] = percentage
             else:
                 self.orders[asset.conid][(pd.Timestamp(self.current_datetime.date()),
                                           self.current_datetime.time())] = percentage
         elif self.mode == StrategyMode.DAILY:
-            if asset.ignore_exchange:
+            if hasattr(asset, "ignore_exchange") and asset.ignore_exchange:
                 self.orders[asset.symbol][(pd.Timestamp(self.current_datetime.date()))] = percentage
             else:
                 self.orders[asset.conid][(pd.Timestamp(self.current_datetime.date()))] = percentage
@@ -476,24 +495,46 @@ class MoonLineStrategy(ABC):
         pass
 
 
+class IterRegistry(type):
+
+    def __iter__(cls):
+        return iter(cls._registry)
+
+
+@total_ordering
+class ProtoAsset(metaclass=IterRegistry):
+    _registry = []
+
+    def __init__(self, symbol):
+        self._registry.append(self)
+        self.symbol = symbol
+        self.conid = symbol
+
+    def __eq__(self, other):
+        return self.symbol == other.symbol
+
+    def __lt__(self, other):
+        return self.symbol < other.symbol
+
+    def __hash__(self):
+        return hash(self.symbol)
+
+
 class CapeShillerETFsUS(MoonLineStrategy):
 
     FORCE_TRADE = [arrow.get("2019-07-25")]
 
     CALENDAR = "NYSE"
-    CAPE_SHILLER_STOCK = Asset("SPY", ignore_exchange=True)
-    RETL = Asset("RETL", ignore_exchange=True)
-    NUGT = Asset("NUGT", ignore_exchange=True)
-    TMF = Asset("TMF", ignore_exchange=True)
-    TYD = Asset("TYD", ignore_exchange=True)
-    SPXS = Asset("SPXS", ignore_exchange=True)
-    SPXL = Asset("SPXL", ignore_exchange=True)
-    TECL = Asset("TECL", ignore_exchange=True)
+    CAPE_SHILLER_STOCK = ProtoAsset("BTC_DGB-15min_data")
+    RETL = ProtoAsset("BTC_DOGE-15min_data")
+    NUGT = ProtoAsset("BTC_DASH-15min_data")
+    TMF = ProtoAsset("BTC_BTS-15min_data")
+    TYD = ProtoAsset("BTC_BCN-15min_data")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.last_price = 0
-        self.history = Pipeline(UniverseDefinition.Q500US)
+        # self.history = Pipeline(UniverseDefinition.Q500US, self.history.default_frequency)
 
         self.schedule_interval(self.rebalance, "D", 1)
         self.schedule_interval(self.cape_check, "M", 1)
@@ -512,8 +553,12 @@ class CapeShillerETFsUS(MoonLineStrategy):
         self.cape_shiller_data = self.cape_shiller_data.set_index("Date")
         self.cape_shiller_data.index = pd.to_datetime(self.cape_shiller_data.index, format="%Y-%m-%dT%H:%M:%S.%f")
 
-        now = arrow.utcnow().to(self.timezone)
-        latest_available_date = arrow.get(self.cape_shiller_data.iloc[-1].name, self.timezone).shift(days=1)
+        if self.timezone:
+            now = arrow.utcnow().to(self.timezone)
+            latest_available_date = arrow.get(self.cape_shiller_data.iloc[-1].name, self.timezone).shift(days=1)
+        else:
+            now = arrow.utcnow()
+            latest_available_date = arrow.get(self.cape_shiller_data.iloc[-1].name).shift(days=1)
         if now.month > latest_available_date.month:
             for new_date in arrow.Arrow.range("month", latest_available_date, now):
                 if new_date.month <= latest_available_date.month:
@@ -602,22 +647,16 @@ class CapeShillerETFsUS(MoonLineStrategy):
         if regime == 4:
             etfs = {
                 self.RETL: 0,
-                self.NUGT: 0,
+                self.NUGT: 1.0,
                 self.TMF: 0,
                 self.TYD: 0,
-                self.SPXS: 0,
-                self.SPXL: 0.5,
-                self.TECL: 0.5,
             }
         elif regime == 3:
             etfs = {
                 self.RETL: 0,
                 self.NUGT: 0,
-                self.TMF: 0,
+                self.TMF: 1.0,
                 self.TYD: 0,
-                self.SPXS: 0,
-                self.SPXL: 1.0,
-                self.TECL: 0,
             }
         elif regime == 2:
             etfs = {
@@ -625,9 +664,6 @@ class CapeShillerETFsUS(MoonLineStrategy):
                 self.NUGT: 0,
                 self.TMF: 0.3,
                 self.TYD: 0.2,
-                self.SPXS: 0,
-                self.SPXL: 0.5,
-                self.TECL: 0,
             }
         elif regime == 5:
             etfs = {
@@ -635,9 +671,6 @@ class CapeShillerETFsUS(MoonLineStrategy):
                 self.NUGT: 0.4,
                 self.TMF: 0,
                 self.TYD: 0,
-                self.SPXS: 0,
-                self.SPXL: 0.6,
-                self.TECL: 0,
             }
         elif regime == 1:
             etfs = {
@@ -645,19 +678,13 @@ class CapeShillerETFsUS(MoonLineStrategy):
                 self.NUGT: 0,
                 self.TMF: 0.6,
                 self.TYD: 0.4,
-                self.SPXS: 0,
-                self.SPXL: 0,
-                self.TECL: 0,
             }
         elif regime == 0:
             etfs = {
                 self.RETL: 0,
                 self.NUGT: 0,
                 self.TMF: 0,
-                self.TYD: 0,
-                self.SPXS: 1.0,
-                self.SPXL: 0,
-                self.TECL: 0,
+                self.TYD: 1.0,
             }
 
         for asset, weight in etfs.items():
@@ -689,7 +716,8 @@ class MoonLineContainer(Moonshot):
             for date, time, conid in tqdm(index_values, total=len(index_values), unit="rows"):
                 new_tuples.append((pd.to_datetime("{} {}".format(date, time), format="%Y-%m-%d %H:%M:%S"), conid))
             history_data.index = pd.MultiIndex.from_tuples(new_tuples, names=["Datetime", "ConId"])
-            history_data.index = pd.MultiIndex.from_tuples([(x[0], Asset(int(x[1]))) for x in history_data.index])
+            history_data.index = pd.MultiIndex.from_tuples(
+                [(x[0], ProtoAsset(x[1])) for x in history_data.index])
 
         # Figure out bar size
         dates = shifted_prices.index.levels[0]
@@ -704,7 +732,7 @@ class MoonLineContainer(Moonshot):
 
         # Prepare DataFrame and required objects
         with timeit("Initializing strategy and history objects"):
-            shifted_prices.index = pd.MultiIndex.from_tuples([(x[0], x[1], Asset(int(x[2])))
+            shifted_prices.index = pd.MultiIndex.from_tuples([(x[0], x[1], ProtoAsset(x[2]))
                                                               for x in shifted_prices.index])
             shifted_prices.index.names = ["Date", "Time", "ConId"]
             history = History(history_data, frequency)
@@ -720,7 +748,7 @@ class MoonLineContainer(Moonshot):
                     date, time = str(datetime.date()), str(datetime.time())
                     data = time_data.loc[time_index]
                     # Update the History object
-                    history.update_time(datetime)
+                    strategy.history.update_time(datetime)
                     # Run the main data handling function
                     strategy.run_handle_data(datetime, data=data)
                     # Run all scheduled functions
@@ -739,7 +767,7 @@ class MoonLineContainer(Moonshot):
                 new_tuples.append((pd.to_datetime(date, format="%Y-%m-%d"), conid))
             history_data.index = pd.MultiIndex.from_tuples(new_tuples, names=["Datetime", "ConId"])
             history_data.index = pd.MultiIndex.from_tuples(
-                [(x[0], Asset(x[1], ignore_exchange=True)) for x in history_data.index])
+                [(x[0], ProtoAsset(x[1])) for x in history_data.index])
 
         # Figure out bar size
         dates = shifted_prices.index.levels[0]
@@ -762,7 +790,7 @@ class MoonLineContainer(Moonshot):
         # Prepare DataFrame and required objects
         with timeit("Initializing strategy and history objects"):
             shifted_prices.index = pd.MultiIndex.from_tuples(
-                [(x[0], Asset(x[1], ignore_exchange=True)) for x in shifted_prices.index])
+                [(x[0], ProtoAsset(x[1])) for x in shifted_prices.index])
             shifted_prices.index.names = ["Date", "ConId"]
             history = History(history_data, frequency)
             strategy = CapeShillerETFsUS(mode=StrategyMode.DAILY, history=history)
@@ -775,7 +803,7 @@ class MoonLineContainer(Moonshot):
                 date = str(datetime.date())
                 data = day_data.loc[day_index]
                 # Update the History object
-                history.update_time(datetime)
+                strategy.history.update_time(datetime)
                 # Run the main data handling function
                 strategy.run_handle_data(datetime, data=data)
                 # Run all scheduled functions
@@ -854,13 +882,14 @@ class UniverseDefinition(Enum):
 
 class Pipeline():
 
-    def __init__(self):
-        # self.client = pms.Client(args.database)
+    def __init__(self, universe_definition: UniverseDefinition, history_object: History):
         self.last_result = {}
         self.last_time = None
         self.last_month = None
         self.current_datetime = None
         self.current_datetime_formatted = None
+        self.history_object = history_object
+        self.universe_definition = universe_definition
 
         self.cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "moonline-cache")
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -881,13 +910,12 @@ class Pipeline():
             return adv_list
 
         adv_list = {}
-        available_symbols = self.client.list_symbols()
+        available_symbols = self.history_object.list_symbols()
         if not available_symbols:
             return {}
 
-        result = self.client.query(pms.Params(available_symbols, "1D", "OHLCV",
-                                              end=self.current_datetime_formatted,
-                                              limit=201)).all()
+        result = self.history_object.history(201, end=self.current_datetime_formatted)
+
         for symbol, data in result.items():
             symbol = symbol.split("/")[0]
             if len(data.array) < 200:
@@ -911,9 +939,8 @@ class Pipeline():
 
         marketcap_list = {}
         adv_symbols = set(adv_list.keys())
-        result = self.client.query(pms.Params(adv_symbols, "1D", "FD",
-                                              end=self.current_datetime_formatted,
-                                              limit=1)).all()
+        result = self.history_object.fundamentals_history(1, end=self.current_datetime_formatted)
+
         for symbol, data in result.items():
             symbol = symbol.split("/")[0]
             if sum(data.array["Marketcap"] > 0) > 0:
@@ -924,7 +951,7 @@ class Pipeline():
 
         return marketcap_list
 
-    def get_universe(self, universe_definition: UniverseDefinition):
+    def get_universe(self):
         if (self.current_datetime.year, self.current_datetime.month) != self.last_time:
             self.last_time = (self.current_datetime.year, self.current_datetime.month)
             adv_list = self.calculate_average_dollar_volume()
@@ -935,7 +962,7 @@ class Pipeline():
             self.last_result[UniverseDefinition.Q3000US] = full_sorted[:3000]
             self.last_result[UniverseDefinition.QTradeableStocksUS] = full_sorted
         # TODO: return OHLCV values instead of just the tickers
-        return self.last_result[universe_definition]
+        return self.last_result[self.universe_definition]
 
     def current(self):
         """Return the current set of values at algorithm time."""
@@ -944,7 +971,7 @@ class Pipeline():
     def history(self, bar_count, frequency=None):
         """Emulate History() behavior."""
         if not frequency:
-            frequency = self.default_frequency
+            frequency = self.history_object.default_frequency
 
         if bar_count <= 0:
             raise Exception("You must request a positive amount of bars. Bars requested: {}".format(bar_count))
@@ -980,14 +1007,14 @@ def main(args):
         from data_providers import PyStoreDataProvider
         with timeit("Loading price data using PyStoreDataProvider"):
             data_provider = PyStoreDataProvider(args.pystore_dir)
-            prices = data_provider.get_ohlcv([asset.symbol for asset in Asset],
+            prices = data_provider.get_ohlcv([asset.symbol for asset in ProtoAsset],
                                              start=args.start_date, end=args.end_date)
     elif args.quantrocket_file:
         from data_providers import QuantRocketDataProvider
         with timeit("Loading price data using QuantRocketDataProvider"):
             data_provider = QuantRocketDataProvider(args.quantrocket_file)
             data_provider.ingest()
-            prices = data_provider.get_ohlcv([asset.symbol for asset in Asset],
+            prices = data_provider.get_ohlcv([asset.symbol for asset in ProtoAsset],
                                              start=args.start_date, end=args.end_date)
     else:
         print("No valid data provider was specified")
